@@ -16,10 +16,10 @@ public:
     std::vector<glm::vec3> positions_this_tick;
     std::vector<glm::vec2> colors_this_tick;
 
-    public:  AbsolutePositionWithSolidColorShaderBatcher(ShaderCache& shader_cache);
-    public:  ~AbsolutePositionWithSolidColorShaderBatcher();
-    public: void queue_draw(const std::vector<glm::vec3> &positions, const std::vector<glm::vec2> &colors);
-    public: void draw_everything();
+    AbsolutePositionWithSolidColorShaderBatcher(ShaderCache& shader_cache);
+    ~AbsolutePositionWithSolidColorShaderBatcher();
+    void queue_draw(const std::vector<glm::vec3> &positions, const std::vector<glm::vec2> &colors);
+    void draw_everything();
 
 private:
     

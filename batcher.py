@@ -13,12 +13,18 @@ class VertexAttribute(Enum):
 
 class ShaderType(Enum):
     ABSOLUTE_POSITION_WITH_SOLID_COLOR = auto()
+    TRANSFORM_V_WITH_TEXTURES = auto()
 
 @dataclass
 class VertexAttributeData:
     singular_name: str
     plural_name: str
     attrib_type: str
+
+shader_type_to_vertex_attributes = {
+    ShaderType.ABSOLUTE_POSITION_WITH_SOLID_COLOR : [VertexAttribute.XYZ_POSITION, VertexAttribute.PASSTHROUGH_COLOR],
+    ShaderType.TRANSFORM_V_WITH_TEXTURES : [VertexAttribute.XYZ_POSITION, VertexAttribute.PASSTHROUGH_TEXTURE_COORDINATE],
+}
 
 
 vertex_attribute_to_data = {
@@ -56,6 +62,9 @@ class ShaderBatcherCppClass:
     def __init__(self, shader_type: ShaderType, vertex_attributes : List[VertexAttribute]):
         self.shader_type = shader_type
         self.vertex_attributes = vertex_attributes
+
+    def get_class_name(self) -> str:
+        return f"{snake_to_camel_case(self.shader_type.name)}ShaderBatcher"
 
     def generate_queue_draw_parameter_list(self) -> str:
         parameter_list = ""
@@ -108,14 +117,13 @@ class ShaderBatcherCppClass:
            data = vertex_attribute_to_data[vertex_attribute]
            body += f"""
     glBindBuffer(GL_ARRAY_BUFFER, {data.plural_name}_buffer_object);
-    glBufferData(GL_ARRAY_BUFFER, {data.plural_name}.size() * sizeof({data.attrib_type}), {data.plural_name}.data(), GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, {data.plural_name}_this_tick.size() * sizeof({data.attrib_type}), {data.plural_name}_this_tick.data(), GL_STATIC_DRAW);
            """
         return body
 
     def generate_cpp_class(self) -> CppClass:
         # Create the Batcher class
-        class_name = f"{snake_to_camel_case(self.shader_type.name)}ShaderBatcher"
-        batcher_class = CppClass(class_name)
+        batcher_class = CppClass(self.get_class_name())
 
         batcher_class.add_member(CppMember("shader_cache", "ShaderCache"))
         batcher_class.add_member(CppMember("vertex_attribute_object", "GLuint"))
@@ -131,7 +139,7 @@ class ShaderBatcherCppClass:
             batcher_class.add_member(CppMember(f"{va_data.plural_name}_this_tick", f"std::vector<{va_data.attrib_type}>"))
 
         
-        batcher_class.add_method(CppMethod(class_name, "", "ShaderCache& shader_cache", 
+        batcher_class.add_method(CppMethod(self.get_class_name(), "", "ShaderCache& shader_cache", 
                                            f"""
     shader_cache = shader_cache;
     glGenVertexArrays(1, &vertex_attribute_object);
@@ -140,7 +148,7 @@ class ShaderBatcherCppClass:
     {self.generate_constructor_body()}
     glBindVertexArray(0);""", "public"))
 
-        batcher_class.add_method(CppMethod(f"~{class_name}", "", "", 
+        batcher_class.add_method(CppMethod(f"~{self.get_class_name()}", "", "", 
                                             "glDeleteVertexArrays(1, &vertex_attribute_object);", "public"))
 
         batcher_class.add_method(CppMethod("queue_draw", "void", self.generate_queue_draw_parameter_list(), 
@@ -162,22 +170,60 @@ class ShaderBatcherCppClass:
 
         return batcher_class
 
+class BatcherCppClassCreator:
+    def __init__(self, constructed_batchers: List[str]):
+        self.constructed_batchers = constructed_batchers
+
+    def generate_cpp_class(self):
+        batcher_class = CppClass("Batcher")
+        for constructed_batcher_name in self.constructed_batchers:
+            batcher_class.add_member(CppMember(camel_to_snake_case(constructed_batcher_name), constructed_batcher_name))
+        return batcher_class
     
 
 if __name__ == "__main__":
 
-    shader_type = ShaderType.ABSOLUTE_POSITION_WITH_SOLID_COLOR
+    constructed_class_names: List[str] = []
+    constructed_header_files: List[str] = []
 
-    colored_shader = ShaderBatcherCppClass(shader_type, [VertexAttribute.XYZ_POSITION, VertexAttribute.PASSTHROUGH_COLOR])
-    batcher_class = colored_shader.generate_cpp_class()
+    for shader_type, vertex_attributes in shader_type_to_vertex_attributes.items():
 
-    # Generate the header and source file content
-    header_content = batcher_class.generate_header(includes = '#include <iostream>\n#include <string>\n#include "../sbpt_generated_includes.hpp"\n\n')
+        shader_batcher = ShaderBatcherCppClass(shader_type, vertex_attributes)
+        batcher_class = shader_batcher.generate_cpp_class()
+
+        # Generate the header and source file content
+        header_content = batcher_class.generate_header(includes = '#include <iostream>\n#include <string>\n#include "../sbpt_generated_includes.hpp"\n\n')
+        source_content = batcher_class.generate_source()
+
+        header_file = f"{shader_type.name.lower()}_shader_batcher.hpp"
+        constructed_header_files.append(header_file)
         
+        header_filename = f"generated/{shader_type.name.lower()}_shader_batcher.hpp"
+        source_filename = f"generated/{shader_type.name.lower()}_shader_batcher.cpp"
+
+        # Write the header content to the header file
+        with open(header_filename, 'w') as header_file:
+            header_file.write(header_content)
+
+        # Write the source content to the source file
+        with open(source_filename, 'w') as source_file:
+            source_file.write(source_content)
+
+        # Optional: Print confirmation message
+        print(f"Header written to {header_filename}")
+        print(f"Source written to {source_filename}")
+        constructed_class_names.append(shader_batcher.get_class_name())
+
+    batcher_cpp_class_creator = BatcherCppClassCreator(constructed_class_names)
+    batcher_class = batcher_cpp_class_creator.generate_cpp_class()
+
+    header_filename = f"generated/batcher.hpp"
+    source_filename = f"generated/batcher.cpp"
+
+    include_statements = "\n".join([f'#include "{header_file}"' for header_file in constructed_header_files]) + "\n\n"
+
+    header_content = batcher_class.generate_header(include_statements)
     source_content = batcher_class.generate_source()
-    
-    header_filename = f"generated/{shader_type.name.lower()}_shader_batcher.hpp"
-    source_filename = f"generated/{shader_type.name.lower()}_shader_batcher.cpp"
 
     # Write the header content to the header file
     with open(header_filename, 'w') as header_file:

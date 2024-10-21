@@ -1,6 +1,6 @@
-#include "absolute_position_with_solid_color_shader_batcher.hpp"
+#include "transform_v_with_textures_shader_batcher.hpp"
 
-AbsolutePositionWithSolidColorShaderBatcher::AbsolutePositionWithSolidColorShaderBatcher(ShaderCache& shader_cache) {
+TransformVWithTexturesShaderBatcher::TransformVWithTexturesShaderBatcher(ShaderCache& shader_cache) {
     
     shader_cache = shader_cache;
     glGenVertexArrays(1, &vertex_attribute_object);
@@ -10,38 +10,38 @@ AbsolutePositionWithSolidColorShaderBatcher::AbsolutePositionWithSolidColorShade
     glGenBuffers(1, &positions_buffer_object);
     shader_cache.configure_vertex_attributes_for_drawables_vao(vertex_attribute_object, positions_buffer_object, shader_type, ShaderVertexAttributeVariable::XYZ_POSITION);
            
-    glGenBuffers(1, &colors_buffer_object);
-    shader_cache.configure_vertex_attributes_for_drawables_vao(vertex_attribute_object, colors_buffer_object, shader_type, ShaderVertexAttributeVariable::PASSTHROUGH_COLOR);
+    glGenBuffers(1, &texture_coordinates_buffer_object);
+    shader_cache.configure_vertex_attributes_for_drawables_vao(vertex_attribute_object, texture_coordinates_buffer_object, shader_type, ShaderVertexAttributeVariable::PASSTHROUGH_TEXTURE_COORDINATE);
            
     glBindVertexArray(0);
 }
 
-AbsolutePositionWithSolidColorShaderBatcher::~AbsolutePositionWithSolidColorShaderBatcher() {
+TransformVWithTexturesShaderBatcher::~TransformVWithTexturesShaderBatcher() {
     glDeleteVertexArrays(1, &vertex_attribute_object);
 }
 
-void AbsolutePositionWithSolidColorShaderBatcher::queue_draw(const std::vector<glm::vec3> &positions, const std::vector<glm::vec2> &colors) {
+void TransformVWithTexturesShaderBatcher::queue_draw(const std::vector<glm::vec3> &positions, const std::vector<glm::vec2> &texture_coordinates) {
     
     std::vector<std::vector<unsigned int>> all_indices = {indices_this_tick, indices};
     indices_this_tick = flatten_and_increment_indices(all_indices);
         
     positions_this_tick.insert(positions.end(), positions.begin(), positions.end());
            
-    colors_this_tick.insert(colors.end(), colors.begin(), colors.end());
+    texture_coordinates_this_tick.insert(texture_coordinates.end(), texture_coordinates.begin(), texture_coordinates.end());
            
 }
 
-void AbsolutePositionWithSolidColorShaderBatcher::draw_everything() {
+void TransformVWithTexturesShaderBatcher::draw_everything() {
     
-    shader_cache.use_shader_program(ShaderType::ABSOLUTE_POSITION_WITH_SOLID_COLOR);
+    shader_cache.use_shader_program(ShaderType::TRANSFORM_V_WITH_TEXTURES);
     glBindVertexArray(vertex_attribute_object);
 
     
     glBindBuffer(GL_ARRAY_BUFFER, positions_buffer_object);
     glBufferData(GL_ARRAY_BUFFER, positions_this_tick.size() * sizeof(glm::vec3), positions_this_tick.data(), GL_STATIC_DRAW);
            
-    glBindBuffer(GL_ARRAY_BUFFER, colors_buffer_object);
-    glBufferData(GL_ARRAY_BUFFER, colors_this_tick.size() * sizeof(glm::vec2), colors_this_tick.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, texture_coordinates_buffer_object);
+    glBufferData(GL_ARRAY_BUFFER, texture_coordinates_this_tick.size() * sizeof(glm::vec2), texture_coordinates_this_tick.data(), GL_STATIC_DRAW);
            
 
     glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
@@ -50,7 +50,7 @@ void AbsolutePositionWithSolidColorShaderBatcher::draw_everything() {
 
     indices_this_tick.clear()
     positions_this_tick.clear();
-    colors_this_tick.clear();
+    texture_coordinates_this_tick.clear();
 
     
 }
