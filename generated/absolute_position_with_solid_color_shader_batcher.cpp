@@ -8,10 +8,10 @@ AbsolutePositionWithSolidColorShaderBatcher::AbsolutePositionWithSolidColorShade
     glGenBuffers(1, &indices_buffer_object);
     
     glGenBuffers(1, &positions_buffer_object);
-    shader_cache.configure_vertex_attributes_for_drawables_vao(vertex_attribute_object, positions_buffer_object, shader_type, ShaderVertexAttributeVariable::XYZ_POSITION);
+    shader_cache.configure_vertex_attributes_for_drawables_vao(vertex_attribute_object, positions_buffer_object, ShaderType::ABSOLUTE_POSITION_WITH_SOLID_COLOR, ShaderVertexAttributeVariable::XYZ_POSITION);
            
     glGenBuffers(1, &colors_buffer_object);
-    shader_cache.configure_vertex_attributes_for_drawables_vao(vertex_attribute_object, colors_buffer_object, shader_type, ShaderVertexAttributeVariable::PASSTHROUGH_COLOR);
+    shader_cache.configure_vertex_attributes_for_drawables_vao(vertex_attribute_object, colors_buffer_object, ShaderType::ABSOLUTE_POSITION_WITH_SOLID_COLOR, ShaderVertexAttributeVariable::PASSTHROUGH_COLOR);
            
     glBindVertexArray(0);
 }

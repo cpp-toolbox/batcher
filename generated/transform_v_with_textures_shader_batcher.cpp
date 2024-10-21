@@ -8,10 +8,10 @@ TransformVWithTexturesShaderBatcher::TransformVWithTexturesShaderBatcher(ShaderC
     glGenBuffers(1, &indices_buffer_object);
     
     glGenBuffers(1, &positions_buffer_object);
-    shader_cache.configure_vertex_attributes_for_drawables_vao(vertex_attribute_object, positions_buffer_object, shader_type, ShaderVertexAttributeVariable::XYZ_POSITION);
+    shader_cache.configure_vertex_attributes_for_drawables_vao(vertex_attribute_object, positions_buffer_object, ShaderType::TRANSFORM_V_WITH_TEXTURES, ShaderVertexAttributeVariable::XYZ_POSITION);
            
     glGenBuffers(1, &texture_coordinates_buffer_object);
-    shader_cache.configure_vertex_attributes_for_drawables_vao(vertex_attribute_object, texture_coordinates_buffer_object, shader_type, ShaderVertexAttributeVariable::PASSTHROUGH_TEXTURE_COORDINATE);
+    shader_cache.configure_vertex_attributes_for_drawables_vao(vertex_attribute_object, texture_coordinates_buffer_object, ShaderType::TRANSFORM_V_WITH_TEXTURES, ShaderVertexAttributeVariable::PASSTHROUGH_TEXTURE_COORDINATE);
            
     glBindVertexArray(0);
 }

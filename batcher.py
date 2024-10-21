@@ -81,7 +81,7 @@ class ShaderBatcherCppClass:
            buffer_object_var_name = f"{data.plural_name}_buffer_object"
            body += f"""
     glGenBuffers(1, &{buffer_object_var_name});
-    shader_cache.configure_vertex_attributes_for_drawables_vao(vertex_attribute_object, {buffer_object_var_name}, shader_type, ShaderVertexAttributeVariable::{vertex_attribute.name});
+    shader_cache.configure_vertex_attributes_for_drawables_vao(vertex_attribute_object, {buffer_object_var_name}, ShaderType::{self.shader_type.name}, ShaderVertexAttributeVariable::{vertex_attribute.name});
            """
         return body
 
