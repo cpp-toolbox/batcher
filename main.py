@@ -41,13 +41,15 @@ class CppMethod:
         self.body = body
         self.access_modifier = access_modifier
 
-    def declaration(self):
-        """Return the declaration of the method with access modifier."""
-        return f"{self.access_modifier}: {self.return_type} {self.name}({self.parameters});"
+    def declaration(self) -> str:
+        """Return the declaration of the method"""
+        space = " " if self.return_type != "" else ""
+        return f"{self.return_type}{space}{self.name}({self.parameters});"
 
-    def definition(self, class_name: str):
+    def definition(self, class_name: str) -> str:
         """Return the definition of the method with class name prepended."""
-        return f"{self.return_type} {class_name}::{self.name}({self.parameters}) {{\n    {self.body}\n}}"
+        space = " " if self.return_type != "" else ""
+        return f"{self.return_type}{space}{class_name}::{self.name}({self.parameters}) {{\n    {self.body}\n}}"
 
 
 class CppClass:
