@@ -9,7 +9,7 @@ public:
     AbsolutePositionWithSolidColorShaderBatcher absolute_position_with_solid_color_shader_batcher;
     TransformVWithTexturesShaderBatcher transform_v_with_textures_shader_batcher;
 
-    
+    Batcher(ShaderCache& shader_cache);
 
 private:
     

@@ -8,7 +8,7 @@ class VertexAttribute(Enum):
     XYZ_POSITION = auto()
     XY_POSITION = auto()
     PASSTHROUGH_TEXTURE_COORDINATE = auto()
-    PASSTHROUGH_COLOR = auto()
+    PASSTHROUGH_RGB_COLOR = auto()
     PASSTHROUGH_NORMAL = auto()
 
 class ShaderType(Enum):
@@ -22,7 +22,7 @@ class VertexAttributeData:
     attrib_type: str
 
 shader_type_to_vertex_attributes = {
-    ShaderType.ABSOLUTE_POSITION_WITH_SOLID_COLOR : [VertexAttribute.XYZ_POSITION, VertexAttribute.PASSTHROUGH_COLOR],
+    ShaderType.ABSOLUTE_POSITION_WITH_SOLID_COLOR : [VertexAttribute.XYZ_POSITION],
     ShaderType.TRANSFORM_V_WITH_TEXTURES : [VertexAttribute.XYZ_POSITION, VertexAttribute.PASSTHROUGH_TEXTURE_COORDINATE],
 }
 
@@ -32,9 +32,8 @@ vertex_attribute_to_data = {
     VertexAttribute.XYZ_POSITION: VertexAttributeData("position", "positions", "glm::vec3"),
     VertexAttribute.XY_POSITION: VertexAttributeData("xy_position", "xy_positions", "glm::vec2"),
     VertexAttribute.PASSTHROUGH_TEXTURE_COORDINATE: VertexAttributeData("texture_coordinate", "texture_coordinates", "glm::vec2"),
-    VertexAttribute.PASSTHROUGH_COLOR: VertexAttributeData("color", "colors", "glm::vec2"),
+    VertexAttribute.PASSTHROUGH_RGB_COLOR: VertexAttributeData("color", "colors", "glm::vec2"),
 }
-
 
 constructor_body_template = """
 glGenVertexArrays(1, &vertex_attribute_object);
@@ -67,7 +66,7 @@ class ShaderBatcherCppClass:
         return f"{snake_to_camel_case(self.shader_type.name)}ShaderBatcher"
 
     def generate_queue_draw_parameter_list(self) -> str:
-        parameter_list = ""
+        parameter_list = "const std::vector<unsigned int> &indices, "
         for vertex_attribute in self.vertex_attributes:
             data = vertex_attribute_to_data[vertex_attribute]
             parameter_list += f"const std::vector<{data.attrib_type}> &{data.plural_name}, "
@@ -93,12 +92,12 @@ class ShaderBatcherCppClass:
         for vertex_attribute in self.vertex_attributes:
            data = vertex_attribute_to_data[vertex_attribute]
            body += f"""
-    {data.plural_name}_this_tick.insert({data.plural_name}.end(), {data.plural_name}.begin(), {data.plural_name}.end());
+    {data.plural_name}_this_tick.insert({data.plural_name}_this_tick.end(), {data.plural_name}.begin(), {data.plural_name}.end());
            """
         return body
 
     def generate_draw_everything_clear_code(self) -> str:
-        body = "indices_this_tick.clear()\n"
+        body = "indices_this_tick.clear();\n"
         for vertex_attribute in self.vertex_attributes:
            data = vertex_attribute_to_data[vertex_attribute]
            body += f"    {data.plural_name}_this_tick.clear();\n"
@@ -112,7 +111,10 @@ class ShaderBatcherCppClass:
         return body
 
     def generate_draw_everything_body(self) -> str:
-        body = ""
+        body = """
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indices_buffer_object);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices_this_tick.size() * sizeof(unsigned int), indices_this_tick.data(), GL_STATIC_DRAW);
+    """
         for vertex_attribute in self.vertex_attributes:
            data = vertex_attribute_to_data[vertex_attribute]
            body += f"""
@@ -138,15 +140,13 @@ class ShaderBatcherCppClass:
             va_data = vertex_attribute_to_data[vertex_attribute]
             batcher_class.add_member(CppMember(f"{va_data.plural_name}_this_tick", f"std::vector<{va_data.attrib_type}>"))
 
-        
-        batcher_class.add_method(CppMethod(self.get_class_name(), "", "ShaderCache& shader_cache", 
-                                           f"""
-    shader_cache = shader_cache;
+        batcher_class.add_constructor("ShaderCache& shader_cache", "shader_cache(shader_cache)", f"""
     glGenVertexArrays(1, &vertex_attribute_object);
     glBindVertexArray(vertex_attribute_object);
     glGenBuffers(1, &indices_buffer_object);
     {self.generate_constructor_body()}
-    glBindVertexArray(0);""", "public"))
+    glBindVertexArray(0);""")
+        
 
         batcher_class.add_method(CppMethod(f"~{self.get_class_name()}", "", "", 
                                             "glDeleteVertexArrays(1, &vertex_attribute_object);", "public"))
@@ -161,7 +161,7 @@ class ShaderBatcherCppClass:
 
     {self.generate_draw_everything_body()}
 
-    glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
+    glDrawElements(GL_TRIANGLES, indices_this_tick.size(), GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
     shader_cache.stop_using_shader_program();
 
@@ -175,10 +175,19 @@ class BatcherCppClassCreator:
         self.constructed_batchers = constructed_batchers
 
     def generate_cpp_class(self):
+        initializer_list = [] 
         batcher_class = CppClass("Batcher")
         for constructed_batcher_name in self.constructed_batchers:
             batcher_class.add_member(CppMember(camel_to_snake_case(constructed_batcher_name), constructed_batcher_name))
+            initializer_list.append(f"{camel_to_snake_case(constructed_batcher_name)}(shader_cache)")
+
+        initializer_list = ", ".join(initializer_list)
+
+
+        batcher_class.add_constructor("ShaderCache& shader_cache", initializer_list, "")
+
         return batcher_class
+    
     
 
 if __name__ == "__main__":

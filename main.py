@@ -34,12 +34,13 @@ class CppMember:
 class CppMethod:
     """Represents a method of a C++ class."""
     
-    def __init__(self, name: str, return_type: str, parameters: str, body: str, access_modifier: str = "public"):
+    def __init__(self, name: str, return_type: str, parameters: str, body: str, access_modifier: str = "public", initializer_list: str = ""):
         self.name = name
         self.return_type = return_type
         self.parameters = parameters
         self.body = body
         self.access_modifier = access_modifier
+        self.initializer_list = initializer_list
 
     def declaration(self) -> str:
         """Return the declaration of the method"""
@@ -49,7 +50,8 @@ class CppMethod:
     def definition(self, class_name: str) -> str:
         """Return the definition of the method with class name prepended."""
         space = " " if self.return_type != "" else ""
-        return f"{self.return_type}{space}{class_name}::{self.name}({self.parameters}) {{\n    {self.body}\n}}"
+        initializer = f" : {self.initializer_list}" if self.initializer_list else ""
+        return f"{self.return_type}{space}{class_name}::{self.name}({self.parameters}){initializer} {{\n    {self.body}\n}}"
 
 
 class CppClass:
@@ -67,6 +69,17 @@ class CppClass:
     def add_method(self, method: CppMethod):
         """Add a method to the class."""
         self.methods.append(method)
+
+    def add_constructor(self, parameters: str, initializer_list: str = "", body: str = ""):
+        """Add a constructor to the class with an optional initializer list."""
+        constructor_method = CppMethod(
+            name=self.name,
+            return_type="",
+            parameters=parameters,
+            body=body,
+            initializer_list=initializer_list
+        )
+        self.add_method(constructor_method)
 
     def generate_header(self, includes: str):
         """Generate the header file content."""
@@ -118,3 +131,16 @@ class CppClass:
             f"}};\n"
         )
 
+
+# Example usage
+if __name__ == "__main__":
+    cpp_class = CppClass("ExampleClass")
+
+    cpp_class.add_member(CppMember("x", CppType.INT))
+    cpp_class.add_member(CppMember("y", CppType.FLOAT))
+
+    # Add a constructor using the new method
+    cpp_class.add_constructor("int x, float y", "x(x), y(y)")
+
+    print(cpp_class.generate_header("#include <iostream>\n"))
+    print(cpp_class.generate_source())

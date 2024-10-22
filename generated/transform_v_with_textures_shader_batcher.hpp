@@ -18,7 +18,7 @@ public:
 
     TransformVWithTexturesShaderBatcher(ShaderCache& shader_cache);
     ~TransformVWithTexturesShaderBatcher();
-    void queue_draw(const std::vector<glm::vec3> &positions, const std::vector<glm::vec2> &texture_coordinates);
+    void queue_draw(const std::vector<unsigned int> &indices, const std::vector<glm::vec3> &positions, const std::vector<glm::vec2> &texture_coordinates);
     void draw_everything();
 
 private:
