@@ -175,11 +175,20 @@ def list_available_shaders(shader_to_used_vertex_attribute_variables):
         return list_available_shaders(shader_to_used_vertex_attribute_variables)  # Re-run selection if not confirmed
     return selected_shaders
     
+import os 
+import shutil
+
+def wipe_generated_directory():
+    if os.path.exists('generated'):
+        shutil.rmtree('generated')
+    os.makedirs('generated')
 
 if __name__ == "__main__":
 
     constructed_class_names: List[str] = []
     constructed_header_files: List[str] = []
+
+    wipe_generated_directory()
 
     selected_shaders = list_available_shaders(shader_to_used_vertex_attribute_variables)
 
