@@ -1,1 +1,0 @@
-../shader_standard/standard.py
