@@ -3,6 +3,8 @@ from enum import Enum, auto;
 from dataclasses import dataclass
 from typing import List
 from shader_summary import *
+import argparse
+import sys
 
 constructor_body_template = """
 glGenVertexArrays(1, &vertex_attribute_object);
@@ -183,32 +185,119 @@ def wipe_generated_directory():
         shutil.rmtree('generated')
     os.makedirs('generated')
 
+def read_config_file(config_file):
+    """Read the configuration file and return a list of ShaderType enums after validation."""
+    with open(config_file, 'r') as file:
+        shader_names = [line.strip() for line in file if line.strip()]
+    
+    return validate_shader_names(shader_names)
+
+def validate_shader_names(shader_names):
+    """Validate shader names and return a list of corresponding ShaderType enums."""
+    valid_shader_names = {shader.name.lower(): shader for shader in ShaderType}  # Map enum names to their values
+
+    selected_shaders = []  # This will hold the valid ShaderType enums
+
+    for shader_name in shader_names:
+        formatted_shader_name = shader_name.lower()  # Convert input to lowercase
+        if formatted_shader_name not in valid_shader_names:
+            print(f"Error: '{shader_name}' is not a valid shader type.")
+            exit(1)  # Stop execution if an invalid shader name is found
+        
+        # Append the corresponding ShaderType enum to the list
+        selected_shaders.append(valid_shader_names[formatted_shader_name])
+
+    print("All shader names are valid.")
+    return selected_shaders  # Return the list of ShaderType enums
+
 if __name__ == "__main__":
 
-    constructed_class_names: List[str] = []
-    constructed_header_files: List[str] = []
+    parser = argparse.ArgumentParser(description='Generate C++ shader batcher classes.')
+    parser.add_argument('--generate-config', '-gc', action='store_true',
+                        help='Generate a config file for the requested shaders.')
+    parser.add_argument('--config-file', '-c', type=str,
+                        help='Path to the configuration file to read from.')
+    parser.add_argument('--config-file-output-dir', '-cfod', type=str, default='.',
+                        help='Directory to save the generated config file (default: current directory).')
 
-    wipe_generated_directory()
+    args = parser.parse_args()
 
-    selected_shaders = list_available_shaders(shader_to_used_vertex_attribute_variables)
 
-    for shader_type, vertex_attributes in shader_to_used_vertex_attribute_variables.items():
+    if args.generate_config:
+        selected_shaders = list_available_shaders(shader_to_used_vertex_attribute_variables)
+        config_file_path = os.path.join(args.config_file_output_dir, '.requested_shaders.txt')
+        with open(config_file_path, 'w') as config_file:
+            for shader in selected_shaders:
+                shader_name = str(shader).split('.')[-1].lower()
+                config_file.write(f"{shader_name}\n")
+        print(f"Configuration written to {config_file_path}")
+    else:
 
-        if shader_type not in selected_shaders:
-            continue
+        if args.config_file:
+            if not os.path.exists(args.config_file):
+                print(f"Configuration file {args.config_file} not found.")
+                sys.exit(1)
 
-        shader_batcher = ShaderBatcherCppClass(shader_type, vertex_attributes)
-        batcher_class = shader_batcher.generate_cpp_class()
+            selected_shaders = read_config_file(args.config_file)
+            print(f"Selected shaders from config file: {selected_shaders}")
+        else:
+            selected_shaders = list_available_shaders(shader_to_used_vertex_attribute_variables)
 
-        # Generate the header and source file content
-        header_content = batcher_class.generate_header(includes = '#include <iostream>\n#include <string>\n#include "../sbpt_generated_includes.hpp"\n\n')
+        constructed_class_names: List[str] = []
+        constructed_header_files: List[str] = []
+
+        wipe_generated_directory()
+
+
+        # Get the directory where the script exists
+        script_directory = os.path.dirname(os.path.abspath(__file__)) + "/generated"
+
+        for shader_type, vertex_attributes in shader_to_used_vertex_attribute_variables.items():
+
+            if shader_type not in selected_shaders:
+                continue
+
+            shader_batcher = ShaderBatcherCppClass(shader_type, vertex_attributes)
+            batcher_class = shader_batcher.generate_cpp_class()
+
+            # Generate the header and source file content
+            header_content = batcher_class.generate_header(
+                includes='#include <iostream>\n#include <string>\n#include "../sbpt_generated_includes.hpp"\n\n'
+            )
+            source_content = batcher_class.generate_source()
+
+            header_file = f"{shader_type.name.lower()}_shader_batcher.hpp"
+            constructed_header_files.append(header_file)
+
+            # Create file paths relative to the script's directory
+            header_filename = os.path.join(script_directory, f"{shader_type.name.lower()}_shader_batcher.hpp")
+            source_filename = os.path.join(script_directory, f"{shader_type.name.lower()}_shader_batcher.cpp")
+
+            # Write the header content to the header file
+            with open(header_filename, 'w') as header_file:
+                header_file.write(header_content)
+
+            # Write the source content to the source file
+            with open(source_filename, 'w') as source_file:
+                source_file.write(source_content)
+
+            # Optional: Print confirmation message
+            print(f"Header written to {header_filename}")
+            print(f"Source written to {source_filename}")
+            constructed_class_names.append(shader_batcher.get_class_name())
+
+        # Generate the batcher class
+        batcher_cpp_class_creator = BatcherCppClassCreator(constructed_class_names)
+        batcher_class = batcher_cpp_class_creator.generate_cpp_class()
+
+        # File paths for the main batcher class
+        header_filename = os.path.join(script_directory, f"batcher.hpp")
+        source_filename = os.path.join(script_directory, f"batcher.cpp")
+
+        include_statements = "\n".join([f'#include "{header_file}"' for header_file in constructed_header_files]) + "\n\n"
+
+        header_content = batcher_class.generate_header(include_statements)
         source_content = batcher_class.generate_source()
-
-        header_file = f"{shader_type.name.lower()}_shader_batcher.hpp"
-        constructed_header_files.append(header_file)
-        
-        header_filename = f"generated/{shader_type.name.lower()}_shader_batcher.hpp"
-        source_filename = f"generated/{shader_type.name.lower()}_shader_batcher.cpp"
 
         # Write the header content to the header file
         with open(header_filename, 'w') as header_file:
@@ -221,35 +310,11 @@ if __name__ == "__main__":
         # Optional: Print confirmation message
         print(f"Header written to {header_filename}")
         print(f"Source written to {source_filename}")
-        constructed_class_names.append(shader_batcher.get_class_name())
 
-    batcher_cpp_class_creator = BatcherCppClassCreator(constructed_class_names)
-    batcher_class = batcher_cpp_class_creator.generate_cpp_class()
-
-    header_filename = f"generated/batcher.hpp"
-    source_filename = f"generated/batcher.cpp"
-
-    include_statements = "\n".join([f'#include "{header_file}"' for header_file in constructed_header_files]) + "\n\n"
-
-    header_content = batcher_class.generate_header(include_statements)
-    source_content = batcher_class.generate_source()
-
-    # Write the header content to the header file
-    with open(header_filename, 'w') as header_file:
-        header_file.write(header_content)
-
-    # Write the source content to the source file
-    with open(source_filename, 'w') as source_file:
-        source_file.write(source_content)
-
-    # Optional: Print confirmation message
-    print(f"Header written to {header_filename}")
-    print(f"Source written to {source_filename}")
-
-    # # Print the generated C++ Batcher class
-    # print("Header Content:\n")
-    # print(header_content)
-    #
-    # print("Source Content:\n")
-    # print(source_content)
+        # # Print the generated C++ Batcher class
+        # print("Header Content:\n")
+        # print(header_content)
+        # 
+        # print("Source Content:\n")
+        # print(source_content)
 
