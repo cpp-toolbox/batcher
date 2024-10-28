@@ -181,9 +181,16 @@ import os
 import shutil
 
 def wipe_generated_directory():
-    if os.path.exists('generated'):
-        shutil.rmtree('generated')
-    os.makedirs('generated')
+    # Get the directory where this script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Define the path for the 'generated' directory relative to the script's location
+    generated_dir = os.path.join(script_dir, 'generated')
+    
+    # Remove 'generated' if it exists and recreate it
+    if os.path.exists(generated_dir):
+        shutil.rmtree(generated_dir)
+    os.makedirs(generated_dir)
 
 def read_config_file(config_file):
     """Read the configuration file and return a list of ShaderType enums after validation."""
