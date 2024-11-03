@@ -1,6 +1,5 @@
-.gitignore
-sbpt_generated_includes.hpp
-__pycache__
-generated
+__pycache__/
+generated/
 shader_summary.py
 standard.py
+sbpt_generated_includes.hpp
