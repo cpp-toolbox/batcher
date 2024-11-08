@@ -22,13 +22,14 @@ class CppType:
 class CppMember:
     """Represents a member of a C++ class."""
     
-    def __init__(self, name: str, type_name: str):
+    def __init__(self, name: str, type_name: str, value: str = ""):
         self.name = name
         self.type_name = type_name
+        self.value = value;
 
     def __str__(self):
         """Return the string representation of the member."""
-        return f"{self.type_name} {self.name};"
+        return f"{self.type_name} {self.name}{"" if self.value == "" else "= " + self.value};"
 
 
 class CppMethod:
