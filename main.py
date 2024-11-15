@@ -30,10 +30,40 @@ def snake_to_camel_case(snake_str):
     components = snake_str.lower().split('_')
     return ''.join(x.title() for x in components)
 
-class ShaderBatcherCppClass:
+def get_draw_data_struct_name(shader_type: ShaderType):
+    return snake_to_camel_case(shader_type.name) + "DrawData"
+
+class ShaderBatcherCppStruct:
     def __init__(self, shader_type: ShaderType, vertex_attributes : List[ShaderVertexAttributeVariable]):
         self.shader_type = shader_type
         self.vertex_attributes = vertex_attributes
+
+    def generate_cpp_struct(self) -> CppStruct:
+
+        struct_name = get_draw_data_struct_name(self.shader_type)
+        cpp_struct = CppStruct(struct_name)
+        cpp_struct.add_member(CppMember("indices", "std::vector<unsigned int>"))
+
+        equals_body_comparisons = ["indices == other.indices"]
+
+        for vertex_attribute in self.vertex_attributes:
+            va_data = shader_vertex_attribute_to_data[vertex_attribute]
+            cpp_struct.add_member(CppMember(f"{va_data.plural_name}", f"std::vector<{va_data.attrib_type}>"))
+            equals_body_comparisons.append(f"{va_data.plural_name} == other.{va_data.plural_name}")
+
+
+        equals_body = "return " + " && ".join(equals_body_comparisons) + ";"
+        
+        cpp_struct.add_method(CppMethod("operator==", "bool", f"const {struct_name} &other", equals_body))
+
+        return cpp_struct
+
+
+
+class ShaderBatcherCppClass:
+    def __init__(self, shader_type: ShaderType, vertex_attributes : List[ShaderVertexAttributeVariable]):
+        self.shader_type = shader_type
+        self.vertex_attributes: List[ShaderVertexAttributeVariable] = vertex_attributes
 
     def get_class_name(self) -> str:
         return f"{snake_to_camel_case(self.shader_type.name)}ShaderBatcher"
@@ -53,20 +83,82 @@ class ShaderBatcherCppClass:
            buffer_object_var_name = f"{data.plural_name}_buffer_object"
            body += f"""
     glGenBuffers(1, &{buffer_object_var_name});
+    // allocate space but don't actually buffer any data (nullptr) note that size is measured in bytes
+    glBindBuffer(GL_ARRAY_BUFFER, {buffer_object_var_name});
+    glBufferData(GL_ARRAY_BUFFER, initial_buffer_size * sizeof({data.attrib_type}), nullptr, GL_DYNAMIC_DRAW);
     shader_cache.configure_vertex_attributes_for_drawables_vao(vertex_attribute_object, {buffer_object_var_name}, ShaderType::{self.shader_type.name}, ShaderVertexAttributeVariable::{vertex_attribute.name});
+           """
+        body += f"""
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indices_buffer_object);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, initial_buffer_size * sizeof(unsigned int), nullptr, GL_DYNAMIC_DRAW);
+    """
+        return body
+
+    def generate_deconstructor(self) -> str:
+        body = f"""
+    glDeleteVertexArrays(1, &vertex_attribute_object);
+    glDeleteBuffers(1, &indices_buffer_object);
+    """
+        for vertex_attribute in self.vertex_attributes:
+           data = shader_vertex_attribute_to_data[vertex_attribute]
+           buffer_object_var_name = f"{data.plural_name}_buffer_object"
+           body += f"""
+    glDeleteBuffers(1, &{buffer_object_var_name});
            """
         return body
 
     def generate_queue_draw_body(self) -> str:
-        body = """
-    std::vector<std::vector<unsigned int>> all_indices = {indices_this_tick, indices};
-    indices_this_tick = flatten_and_increment_indices(all_indices);
+
+        def generate_sub_buffering_calls() -> str:
+            lines = []
+            for v in self.vertex_attributes:
+                sva_data = shader_vertex_attribute_to_data[v]
+                lines.append(f"glBindBuffer(GL_ARRAY_BUFFER, {sva_data.plural_name}_buffer_object);")
+                lines.append(f"glBufferSubData(GL_ARRAY_BUFFER, curr_{sva_data.singular_name}_buffer_offset * sizeof({sva_data.attrib_type}), {sva_data.plural_name}.size() * sizeof({sva_data.attrib_type}), {sva_data.plural_name}.data());")
+                lines.append(f"curr_{sva_data.singular_name}_buffer_offset += {sva_data.plural_name}.size();")
+                lines.append("\n")
+
+            indentation = TAB * 2
+            for i in range(len(lines)):
+                lines[i] = indentation + lines[i]
+
+            return '\n'.join(lines)
+
+        body = f"""
+    {get_draw_data_struct_name(self.shader_type)} new_data = {{indices, {", ".join([shader_vertex_attribute_to_data[v].plural_name for v in self.vertex_attributes])}}};
+
+    // Check if it's already cached
+    auto cached_pos_it = std::find(cached_draw_data.begin(), cached_draw_data.end(), new_data);
+    if (cached_pos_it != cached_draw_data.end()) {{
+        // It's cached, but not yet in the set of things to draw this tick
+        auto draw_it = std::find(draw_data_this_tick.begin(),
+                                 draw_data_this_tick.end(), new_data);
+        if (draw_it == draw_data_this_tick.end()) {{
+            draw_data_this_tick.push_back(new_data);
+        }}
+        std::cout << "using cached" << std::endl;
+    }} else {{
+        // it's new, so we need to modify indices to not collide with any of the others
+        std::vector<unsigned int> new_indices = new_data.indices;
+        for (unsigned int &index : new_indices) {{
+            index += largest_index_used_so_far;
+        }}
+
+        glBindVertexArray(vertex_attribute_object);
+
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indices_buffer_object);
+        glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, curr_index_buffer_offset * sizeof(unsigned int), new_indices.size() * sizeof(unsigned int), new_indices.data());
+        curr_index_buffer_offset += new_indices.size(); 
+
+{generate_sub_buffering_calls()}
+
+        glBindVertexArray(0);
+
+        cached_draw_data.push_back(new_data);
+        draw_data_this_tick.push_back(new_data);
+    }}
+
         """
-        for vertex_attribute in self.vertex_attributes:
-           data = shader_vertex_attribute_to_data[vertex_attribute]
-           body += f"""
-    {data.plural_name}_this_tick.insert({data.plural_name}_this_tick.end(), {data.plural_name}.begin(), {data.plural_name}.end());
-           """
         return body
 
     def generate_draw_everything_clear_code(self) -> str:
@@ -84,16 +176,22 @@ class ShaderBatcherCppClass:
         return body
 
     def generate_draw_everything_body(self) -> str:
-        body = """
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indices_buffer_object);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices_this_tick.size() * sizeof(unsigned int), indices_this_tick.data(), GL_STATIC_DRAW);
+        body = f"""
+    shader_cache.use_shader_program(ShaderType::{self.shader_type.name});
+    glBindVertexArray(vertex_attribute_object);
+
+    // Concatenate all indices into a single vector for drawing
+    std::vector<unsigned int> all_indices;
+    for (const auto &draw_data : draw_data_this_tick) {{
+        const std::vector<unsigned int> &indices = draw_data.indices;
+        all_indices.insert(all_indices.end(), indices.begin(), indices.end());
+    }}
+
+    glDrawElements(GL_TRIANGLES, all_indices.size(), GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+    shader_cache.stop_using_shader_program();
     """
-        for vertex_attribute in self.vertex_attributes:
-           data = shader_vertex_attribute_to_data[vertex_attribute]
-           body += f"""
-    glBindBuffer(GL_ARRAY_BUFFER, {data.plural_name}_buffer_object);
-    glBufferData(GL_ARRAY_BUFFER, {data.plural_name}_this_tick.size() * sizeof({data.attrib_type}), {data.plural_name}_this_tick.data(), GL_STATIC_DRAW);
-           """
+
         return body
 
     def generate_cpp_class(self) -> CppClass:
@@ -102,44 +200,41 @@ class ShaderBatcherCppClass:
 
         batcher_class.add_member(CppMember("shader_cache", "ShaderCache"))
         batcher_class.add_member(CppMember("vertex_attribute_object", "GLuint"))
-        batcher_class.add_member(CppMember("indices_buffer_object", f"GLuint"))
+        batcher_class.add_member(CppMember("indices_buffer_object", "GLuint"))
         # add vector for each thing this shader type has
         for vertex_attribute in self.vertex_attributes:
             va_data = shader_vertex_attribute_to_data[vertex_attribute]
             batcher_class.add_member(CppMember(f"{va_data.plural_name}_buffer_object", "GLuint"))
 
-        batcher_class.add_member(CppMember("indices_this_tick", f"std::vector<unsigned int>"))
+
+        batcher_class.add_member(CppMember("curr_index_buffer_offset", "unsigned int", "0"))
+        batcher_class.add_member(CppMember("largest_index_used_so_far", "unsigned int", "0"))
         for vertex_attribute in self.vertex_attributes:
             va_data = shader_vertex_attribute_to_data[vertex_attribute]
-            batcher_class.add_member(CppMember(f"{va_data.plural_name}_this_tick", f"std::vector<{va_data.attrib_type}>"))
+            batcher_class.add_member(CppMember(f"curr_{va_data.singular_name}_buffer_offset", "unsigned int", "0"))
+
+        batcher_class.add_member(CppMember("draw_data_this_tick", f"std::vector<{get_draw_data_struct_name(self.shader_type)}>"))
+        batcher_class.add_member(CppMember("cached_draw_data", f"std::vector<{get_draw_data_struct_name(self.shader_type)}>"))
 
         batcher_class.add_constructor("ShaderCache& shader_cache", "shader_cache(shader_cache)", f"""
     glGenVertexArrays(1, &vertex_attribute_object);
     glBindVertexArray(vertex_attribute_object);
     glGenBuffers(1, &indices_buffer_object);
+    // reserve space for 1 million elements, probably overkill
+    const size_t initial_buffer_size = 10000000;
     {self.generate_constructor_body()}
     glBindVertexArray(0);""")
         
 
+
         batcher_class.add_method(CppMethod(f"~{self.get_class_name()}", "", "", 
-                                            "glDeleteVertexArrays(1, &vertex_attribute_object);", "public"))
+                                            self.generate_deconstructor(), "public"))
 
         batcher_class.add_method(CppMethod("queue_draw", "void", self.generate_queue_draw_parameter_list(), 
                                             self.generate_queue_draw_body(), "public"))
 
         # Add draw method
-        batcher_class.add_method(CppMethod("draw_everything", "void", "", f"""
-    shader_cache.use_shader_program(ShaderType::{self.shader_type.name});
-    glBindVertexArray(vertex_attribute_object);
-
-    {self.generate_draw_everything_body()}
-
-    glDrawElements(GL_TRIANGLES, indices_this_tick.size(), GL_UNSIGNED_INT, 0);
-    glBindVertexArray(0);
-    shader_cache.stop_using_shader_program();
-
-    {self.generate_draw_everything_clear_code()}
-    """, "public"))
+        batcher_class.add_method(CppMethod("draw_everything", "void", "", self.generate_draw_everything_body(), "public"))
 
         return batcher_class
 
@@ -147,7 +242,7 @@ class BatcherCppClassCreator:
     def __init__(self, constructed_batchers: List[str]):
         self.constructed_batchers = constructed_batchers
 
-    def generate_cpp_class(self):
+    def generate_cpp_class(self) -> CppClass:
         initializer_list = [] 
         batcher_class = CppClass("Batcher")
         requested_shader_types = []
@@ -267,23 +362,16 @@ if __name__ == "__main__":
 
         wipe_generated_directory()
 
-
         # Get the directory where the script exists
         script_directory = os.path.dirname(os.path.abspath(__file__)) + "/generated"
 
+
         for shader_type, vertex_attributes in shader_to_used_vertex_attribute_variables.items():
+
 
             if shader_type not in selected_shaders:
                 continue
 
-            shader_batcher = ShaderBatcherCppClass(shader_type, vertex_attributes)
-            batcher_class = shader_batcher.generate_cpp_class()
-
-            # Generate the header and source file content
-            header_content = batcher_class.generate_header(
-                includes='#include <iostream>\n#include <string>\n#include "../sbpt_generated_includes.hpp"\n\n'
-            )
-            source_content = batcher_class.generate_source()
 
             header_file = f"{shader_type.name.lower()}_shader_batcher.hpp"
             constructed_header_files.append(header_file)
@@ -291,6 +379,21 @@ if __name__ == "__main__":
             # Create file paths relative to the script's directory
             header_filename = os.path.join(script_directory, f"{shader_type.name.lower()}_shader_batcher.hpp")
             source_filename = os.path.join(script_directory, f"{shader_type.name.lower()}_shader_batcher.cpp")
+
+            shader_batcher_header_and_source = CppHeaderAndSource(f"{shader_type.name.lower()}_shader_batcher")
+
+            shader_batcher_header_and_source.add_include('#include <iostream>\n#include <string>\n#include "../sbpt_generated_includes.hpp"\n\n');
+
+            shader_batcher = ShaderBatcherCppClass(shader_type, vertex_attributes)
+            batcher_class = shader_batcher.generate_cpp_class()
+            shader_batcher_header_and_source.add_class(batcher_class)
+
+            shader_batcher_draw_info_struct = ShaderBatcherCppStruct(shader_type, vertex_attributes)
+            struct = shader_batcher_draw_info_struct.generate_cpp_struct()
+            shader_batcher_header_and_source.add_struct(struct)
+
+            source_content = shader_batcher_header_and_source.generate_source_content()
+            header_content = shader_batcher_header_and_source.generate_header_content()
 
             # Write the header content to the header file
             with open(header_filename, 'w') as header_file:
@@ -305,7 +408,8 @@ if __name__ == "__main__":
             print(f"Source written to {source_filename}")
             constructed_class_names.append(shader_batcher.get_class_name())
 
-        # Generate the batcher class
+
+
         batcher_cpp_class_creator = BatcherCppClassCreator(constructed_class_names)
         batcher_class = batcher_cpp_class_creator.generate_cpp_class()
 
@@ -315,8 +419,13 @@ if __name__ == "__main__":
 
         include_statements = "\n".join([f'#include "{header_file}"' for header_file in constructed_header_files]) + "\n\n"
 
-        header_content = batcher_class.generate_header(include_statements)
-        source_content = batcher_class.generate_source()
+        batcher_class.add_include(include_statements);
+
+        batcher_header_and_source = CppHeaderAndSource("batcher")
+        batcher_header_and_source.add_class(batcher_class)
+
+        header_content = batcher_header_and_source.generate_header_content()
+        source_content = batcher_header_and_source.generate_source_content()
 
         # Write the header content to the header file
         with open(header_filename, 'w') as header_file:

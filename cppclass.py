@@ -1,4 +1,6 @@
 import re
+from typing import List, Set
+
 
 def camel_to_snake_case(camel_str):
     # Add an underscore before each capital letter and convert to lowercase
@@ -48,12 +50,45 @@ class CppMethod:
         space = " " if self.return_type != "" else ""
         return f"{self.return_type}{space}{self.name}({self.parameters});"
 
-    def definition(self, class_name: str) -> str:
+    def get_definition(self, class_name: str) -> str:
         """Return the definition of the method with class name prepended."""
         space = " " if self.return_type != "" else ""
         initializer = f" : {self.initializer_list}" if self.initializer_list else ""
         return f"{self.return_type}{space}{class_name}::{self.name}({self.parameters}){initializer} {{\n    {self.body}\n}}"
 
+
+class CppStruct:
+    def __init__(self, name: str):
+        self.name = name
+        self.members = []
+        self.methods : List[CppMethod] = []
+
+    def add_member(self, member: CppMember):
+        self.members.append(member)
+
+    def add_method(self, method: CppMethod):
+        self.methods.append(method)
+
+    def generate_header_content(self):
+        members_str = "\n    ".join(str(member) for member in self.members)
+
+        methods_str = "\n    ".join(method.declaration() for method in self.methods )
+
+        header_content = (
+            f"struct {self.name} {{\n"
+            f"    {members_str}\n"
+            f"    {methods_str}\n"
+            f"}};\n\n"
+        )
+        return header_content
+
+    def generate_source_content(self):
+        """Generate the source file content."""
+
+        # Add method definitions to the source content with class name prepended
+        source_content = "\n\n".join(method.get_definition(self.name) for method in self.methods) + "\n\n"
+
+        return source_content
 
 class CppClass:
     """Represents a C++ class."""
@@ -61,7 +96,12 @@ class CppClass:
     def __init__(self, name: str):
         self.name = name
         self.members = []
-        self.methods = []
+        self.methods: List[CppMethod] = []
+        # includes required for this specific class
+        self.includes: List[str] = []
+
+    def add_include(self, include: str) -> None:
+        self.includes.append(include)
 
     def add_member(self, member: CppMember):
         """Add a member to the class."""
@@ -82,9 +122,8 @@ class CppClass:
         )
         self.add_method(constructor_method)
 
-    def generate_header(self, includes: str):
+    def generate_header_content(self):
         """Generate the header file content."""
-        guard_name = f"{camel_to_snake_case(self.name).upper()}_HPP"
 
         members_str = "\n    ".join(str(member) for member in self.members)
 
@@ -93,9 +132,6 @@ class CppClass:
         private_methods_str = "\n    ".join(method.declaration() for method in self.methods if method.access_modifier == "private")
 
         header_content = (
-            f"#ifndef {guard_name}\n"
-            f"#define {guard_name}\n\n"
-            f"{includes}"
             f"class {self.name} {{\n"
             f"public:\n"
             f"    {members_str}\n"
@@ -103,16 +139,15 @@ class CppClass:
             f"\nprivate:\n"
             f"    {private_methods_str}\n"
             f"}};\n\n"
-            f"#endif // {guard_name}\n"
         )
         return header_content
 
-    def generate_source(self):
+    def generate_source_content(self):
         """Generate the source file content."""
-        source_content = f"#include \"{camel_to_snake_case(self.name)}.hpp\"\n\n"
+        source_content = ""
 
         # Add method definitions to the source content with class name prepended
-        definitions_str = "\n\n".join(method.definition(self.name) for method in self.methods)
+        definitions_str = "\n\n".join(method.get_definition(self.name) for method in self.methods)
         source_content += definitions_str
 
         return source_content
@@ -132,16 +167,78 @@ class CppClass:
             f"}};\n"
         )
 
+class CppHeaderAndSource:
+
+    def __init__(self, name: str):
+        self.name = name
+        self.structs: List[CppStruct] = []
+        self.includes: List[str] = []
+        self.classes: List[CppClass] = []
+
+    def add_include(self, include: str) -> None:
+        self.includes.append(include)
+
+    def add_struct(self, struct: CppStruct) -> None:
+        self.structs.append(struct)
+
+    def add_class(self, cls: CppClass) -> None:
+        self.classes.append(cls)
+
+    def generate_header_content(self):
+        header_file_content = ""
+        guard_name = f"{camel_to_snake_case(self.name).upper()}_HPP"
+        all_includes = []
+        all_includes.extend(self.includes)
+
+        header_file_content +=  f"#ifndef {guard_name}\n"
+        header_file_content += f"#define {guard_name}\n\n"
+
+        for cls in self.classes:
+            all_includes.extend(cls.includes)
+
+        header_file_content += '\n'.join(all_includes)
+
+        for struct in self.structs:
+            header_file_content += struct.generate_header_content();
+
+        for cls in self.classes:
+            header_file_content += cls.generate_header_content();
+
+        header_file_content += f"#endif // {guard_name}"
+
+        return header_file_content
+
+    def generate_source_content(self):
+        source_content = f"#include \"{self.name}.hpp\"\n\n"
+
+        for struct in self.structs:
+            source_content += struct.generate_source_content();
+
+        for cls in self.classes:
+            source_content += cls.generate_source_content()
+
+        return source_content
 
 # Example usage
 if __name__ == "__main__":
-    cpp_class = CppClass("ExampleClass")
 
+    cpp_header_and_source = CppHeaderAndSource("example_file")
+
+    cpp_struct = CppStruct("ExampleStruct")
+    cpp_struct.add_member(CppMember("w", CppType.INT))
+    cpp_struct.add_member(CppMember("z", CppType.INT))
+    cpp_struct.add_method(CppMethod("add", "int", "", "return w + z;"))
+
+    cpp_class = CppClass("ExampleClass")
     cpp_class.add_member(CppMember("x", CppType.INT))
     cpp_class.add_member(CppMember("y", CppType.FLOAT))
+    cpp_class.add_include("#include <iostream>\n")
 
     # Add a constructor using the new method
     cpp_class.add_constructor("int x, float y", "x(x), y(y)")
 
-    print(cpp_class.generate_header("#include <iostream>\n"))
-    print(cpp_class.generate_source())
+    cpp_header_and_source.add_struct(cpp_struct)
+    cpp_header_and_source.add_class(cpp_class)
+
+    print(cpp_header_and_source.generate_header_content())
+    print(cpp_header_and_source.generate_source_content())
