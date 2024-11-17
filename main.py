@@ -127,6 +127,7 @@ class ShaderBatcherCppClass:
         body = f"""
     {get_draw_data_struct_name(self.shader_type)} new_data = {{indices, {", ".join([shader_vertex_attribute_to_data[v].plural_name for v in self.vertex_attributes])}}};
 
+
     // Check if it's already cached
     auto cached_pos_it = std::find(cached_draw_data.begin(), cached_draw_data.end(), new_data);
     if (cached_pos_it != cached_draw_data.end()) {{
@@ -136,26 +137,36 @@ class ShaderBatcherCppClass:
         if (draw_it == draw_data_this_tick.end()) {{
             draw_data_this_tick.push_back(new_data);
         }}
-        std::cout << "using cached" << std::endl;
     }} else {{
-        // it's new, so we need to modify indices to not collide with any of the others
-        std::vector<unsigned int> new_indices = new_data.indices;
-        for (unsigned int &index : new_indices) {{
+
+        auto data_with_relative_indices = new_data;
+        unsigned int largest_index_in_current_data = 0;
+
+        // Adjust indices and find the largest index in the current data
+        for (unsigned int &index : data_with_relative_indices.indices) {{
             index += largest_index_used_so_far;
+            if (index > largest_index_in_current_data) {{
+                largest_index_in_current_data = index;
+            }}
         }}
+
+        // suppose the above indices has 0, 1, 2, 3 in some order, and the largest index so far was equal to
+        // 72, then the the largest index so far would now be 75 as it reaches it, but we need to make sure on the next
+        // iteration that we don't collide with 75 again, so +1, (collision happens if there is a 0 index)
+        largest_index_used_so_far = largest_index_in_current_data + 1;
 
         glBindVertexArray(vertex_attribute_object);
 
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indices_buffer_object);
-        glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, curr_index_buffer_offset * sizeof(unsigned int), new_indices.size() * sizeof(unsigned int), new_indices.data());
-        curr_index_buffer_offset += new_indices.size(); 
+        glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, curr_index_buffer_offset * sizeof(unsigned int), data_with_relative_indices.indices.size() * sizeof(unsigned int), data_with_relative_indices.indices.data());
+        curr_index_buffer_offset +=  data_with_relative_indices.indices.size(); 
 
 {generate_sub_buffering_calls()}
 
         glBindVertexArray(0);
 
         cached_draw_data.push_back(new_data);
-        draw_data_this_tick.push_back(new_data);
+        draw_data_this_tick.push_back(data_with_relative_indices);
     }}
 
         """
@@ -186,6 +197,8 @@ class ShaderBatcherCppClass:
         const std::vector<unsigned int> &indices = draw_data.indices;
         all_indices.insert(all_indices.end(), indices.begin(), indices.end());
     }}
+
+    // TODO we probably actually have to do something with indices here...
 
     glDrawElements(GL_TRIANGLES, all_indices.size(), GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
