@@ -127,6 +127,17 @@ class ShaderBatcherCppClass:
         body = f"""
     {get_draw_data_struct_name(self.shader_type)} new_data = {{indices, {", ".join([shader_vertex_attribute_to_data[v].plural_name for v in self.vertex_attributes])}}};
 
+    auto data_with_relative_indices = new_data;
+    unsigned int largest_index_in_current_data = 0;
+
+    // Adjust indices and find the largest index in the current data
+    for (unsigned int &index : data_with_relative_indices.indices) {{
+        index += largest_index_used_so_far;
+        if (index > largest_index_in_current_data) {{
+            largest_index_in_current_data = index;
+        }}
+    }}
+
 
     // Check if it's already cached
     auto cached_pos_it = std::find(cached_draw_data.begin(), cached_draw_data.end(), new_data);
@@ -135,20 +146,10 @@ class ShaderBatcherCppClass:
         auto draw_it = std::find(draw_data_this_tick.begin(),
                                  draw_data_this_tick.end(), new_data);
         if (draw_it == draw_data_this_tick.end()) {{
-            draw_data_this_tick.push_back(new_data);
+            // notice that we push the relative indices
+            draw_data_this_tick.push_back(data_with_relative_indices);
         }}
     }} else {{
-
-        auto data_with_relative_indices = new_data;
-        unsigned int largest_index_in_current_data = 0;
-
-        // Adjust indices and find the largest index in the current data
-        for (unsigned int &index : data_with_relative_indices.indices) {{
-            index += largest_index_used_so_far;
-            if (index > largest_index_in_current_data) {{
-                largest_index_in_current_data = index;
-            }}
-        }}
 
         // suppose the above indices has 0, 1, 2, 3 in some order, and the largest index so far was equal to
         // 72, then the the largest index so far would now be 75 as it reaches it, but we need to make sure on the next
