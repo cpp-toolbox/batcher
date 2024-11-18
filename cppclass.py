@@ -3,8 +3,34 @@ from typing import List, Set
 
 
 def camel_to_snake_case(camel_str):
-    # Add an underscore before each capital letter and convert to lowercase
-    snake_str = re.sub(r'(?<!^)(?=[A-Z])', '_', camel_str).lower()
+    """
+    Convert a camelCase or PascalCase string to snake_case.
+    
+    Handles cases with letters and digits, ensuring underscores are 
+    added appropriately between camelCase segments and numbers.
+    
+    Args:
+        camel_str (str): The camelCase or PascalCase string.
+    
+    Returns:
+        str: The snake_case version of the string.
+    """
+    # Add underscores before uppercase letters that are not at the start
+    snake_str = re.sub(r'(?<!^)(?=[A-Z])', '_', camel_str)  # Adds underscores before capital letters
+    
+    # Add underscores between letters and digits, but not between digits themselves
+    snake_str = re.sub(r'(?<=\D)(?=\d)', '_', snake_str)   # Adds underscores between letters and digits
+    snake_str = re.sub(r'(?<=\d)(?=\D)', '_', snake_str)   # Adds underscores between digits and letters
+    
+    # Convert all to lowercase
+    snake_str = snake_str.lower()
+    
+    # Remove multiple consecutive underscores
+    snake_str = re.sub(r'_{2,}', '_', snake_str)
+    
+    # Remove trailing underscores if they exist
+    snake_str = snake_str.rstrip('_')
+    
     return snake_str
 
 class CppType:

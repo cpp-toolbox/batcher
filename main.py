@@ -259,7 +259,7 @@ class BatcherCppClassCreator:
     def generate_cpp_class(self) -> CppClass:
         initializer_list = [] 
         batcher_class = CppClass("Batcher")
-        requested_shader_types = []
+        # requested_shader_types = []
 
         # Add constructed batchers as members and add them to the initializer list
         for constructed_batcher_name in self.constructed_batchers:
@@ -268,14 +268,15 @@ class BatcherCppClassCreator:
             # remove from end
             clip_size = len("_SHADER_BATCHER")
             shader_type = camel_to_snake_case(constructed_batcher_name)[:-clip_size].upper()
-            requested_shader_types.append(f"{TAB * 2}ShaderType::{shader_type}");
+            # requested_shader_types.append(f"{TAB * 2}ShaderType::{shader_type}");
 
         # Add requested_shaders member
-        batcher_class.add_member(CppMember("requested_shaders", "std::vector<ShaderType>", "{\n" + ",\n".join(requested_shader_types) + f"\n{TAB}}}"))
+        batcher_class.add_member(CppMember("requested_shaders", "static std::vector<ShaderType>", ))
 
         initializer_list = ", ".join(initializer_list)
 
         # Add constructor with updated initializer list
+        # batcher_class.add_constructor("ShaderCache& shader_cache", initializer_list, "requested_shaders = {\n" + ",\n".join(requested_shader_types) + f"\n{TAB}}};")
         batcher_class.add_constructor("ShaderCache& shader_cache", initializer_list, "")
 
         return batcher_class
