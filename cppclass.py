@@ -1,5 +1,5 @@
 import re
-from typing import List, Set
+from typing import List, Set, Tuple
 
 
 def camel_to_snake_case(camel_str):
@@ -63,58 +63,93 @@ class CppMember:
 class CppMethod:
     """Represents a method of a C++ class."""
     
-    def __init__(self, name: str, return_type: str, parameters: str, body: str, access_modifier: str = "public", initializer_list: str = ""):
+    def __init__(self, name: str, return_type: str, parameters: str, body: str, access_modifier: str = "public", initializer_list: str = "", define_in_header: bool = False, qualifiers : List[str] = []):
         self.name = name
         self.return_type = return_type
         self.parameters = parameters
         self.body = body
         self.access_modifier = access_modifier
         self.initializer_list = initializer_list
+        self.define_in_header = define_in_header
+        self.qualifiers = qualifiers
 
     def declaration(self) -> str:
         """Return the declaration of the method"""
         space = " " if self.return_type != "" else ""
-        return f"{self.return_type}{space}{self.name}({self.parameters});"
+        qualifier_str = " " + " ".join(self.qualifiers) if len(self.qualifiers) != 0 else ''
+        return f"{self.return_type}{space}{self.name}({self.parameters}){qualifier_str};"
 
     def get_definition(self, class_name: str) -> str:
         """Return the definition of the method with class name prepended."""
         space = " " if self.return_type != "" else ""
         initializer = f" : {self.initializer_list}" if self.initializer_list else ""
-        return f"{self.return_type}{space}{class_name}::{self.name}({self.parameters}){initializer} {{\n    {self.body}\n}}"
+        qualifier_str = " " + " ".join(self.qualifiers) if len(self.qualifiers) != 0 else ''
+
+        definition = ""
+        if self.define_in_header:
+            definition = f"{self.return_type}{space}{self.name}({self.parameters}){initializer}{qualifier_str} {{\n    {self.body}\n}}"
+        else:
+            # TODO: verify if this is the correct syntax wrt initializer list and qualifier string, could be a problem.
+            definition = f"{self.return_type}{space}{class_name}::{self.name}({self.parameters}){initializer}{qualifier_str} {{\n    {self.body}\n}}"
+
+        return definition
 
 
-class CppStruct:
-    def __init__(self, name: str):
-        self.name = name
-        self.members = []
-        self.methods : List[CppMethod] = []
 
-    def add_member(self, member: CppMember):
-        self.members.append(member)
 
-    def add_method(self, method: CppMethod):
-        self.methods.append(method)
+def get_public_and_private_methods_for_header(class_name: str, methods: List[CppMethod]) -> Tuple[List[str], List[str]]:
+    """
+    this function gets public and private method strings for a class.
+    note that this was pulled out as both structs and classes use this
+    """
 
-    def generate_header_content(self):
-        members_str = "\n    ".join(str(member) for member in self.members)
+    public_methods: List[str] = []
+    private_methods: List[str] = []
 
-        methods_str = "\n    ".join(method.declaration() for method in self.methods )
+    for method in methods:
+        if method.access_modifier == "public":
+            if method.define_in_header:
+                public_methods.append(method.get_definition(class_name))
+            else:
+                public_methods.append(method.declaration())
 
-        header_content = (
-            f"struct {self.name} {{\n"
-            f"    {members_str}\n"
-            f"    {methods_str}\n"
-            f"}};\n\n"
-        )
-        return header_content
+        if method.access_modifier == "private":
+            if method.define_in_header:
+                private_methods.append(method.get_definition(class_name))
+            else:
+                private_methods.append(method.declaration())
 
-    def generate_source_content(self):
-        """Generate the source file content."""
+    return public_methods, private_methods
 
-        # Add method definitions to the source content with class name prepended
-        source_content = "\n\n".join(method.get_definition(self.name) for method in self.methods) + "\n\n"
+def generate_header_content_for_class_or_struct(is_class: bool, class_or_struct_name: str, members: List[CppMember], methods: List[CppMethod]) -> str:
 
-        return source_content
+    members_str = "\n    ".join(str(member) for member in members)
+
+    public_methods, private_methods = get_public_and_private_methods_for_header(class_or_struct_name, methods)
+
+    public_methods_str = "\n    ".join(public_methods)
+    private_methods_str = "\n    ".join(private_methods)
+
+    header_content = (
+        f"{'class' if is_class else 'struct'} {class_or_struct_name} {{\n"
+        f"public:\n"
+        f"    {members_str}\n"
+        f"\n    {public_methods_str}\n"
+        f"\nprivate:\n"
+        f"    {private_methods_str}\n"
+        f"}};\n\n"
+    )
+    return header_content
+
+
+def generate_source_content_for_class_or_struct(class_or_struct_name: str,  methods: List[CppMethod]) -> str:
+    source_content = ""
+
+    # Add method definitions to the source content with class name prepended, so long as they're not already defined in header.
+    definitions_str = "\n\n".join(method.get_definition(class_or_struct_name) for method in methods if not method.define_in_header)
+    source_content += definitions_str
+
+    return source_content
 
 class CppClass:
     """Represents a C++ class."""
@@ -150,33 +185,11 @@ class CppClass:
 
     def generate_header_content(self):
         """Generate the header file content."""
-
-        members_str = "\n    ".join(str(member) for member in self.members)
-
-        # Separate public and private method declarations
-        public_methods_str = "\n    ".join(method.declaration() for method in self.methods if method.access_modifier == "public")
-        private_methods_str = "\n    ".join(method.declaration() for method in self.methods if method.access_modifier == "private")
-
-        header_content = (
-            f"class {self.name} {{\n"
-            f"public:\n"
-            f"    {members_str}\n"
-            f"\n    {public_methods_str}\n"
-            f"\nprivate:\n"
-            f"    {private_methods_str}\n"
-            f"}};\n\n"
-        )
-        return header_content
+        return generate_header_content_for_class_or_struct(True, self.name, self.members, self.methods)
 
     def generate_source_content(self):
         """Generate the source file content."""
-        source_content = ""
-
-        # Add method definitions to the source content with class name prepended
-        definitions_str = "\n\n".join(method.get_definition(self.name) for method in self.methods)
-        source_content += definitions_str
-
-        return source_content
+        return generate_source_content_for_class_or_struct(self.name, self.methods)
 
     def __str__(self):
         """Return the string representation of the class."""
@@ -193,13 +206,35 @@ class CppClass:
             f"}};\n"
         )
 
+class CppStruct:
+    def __init__(self, name: str):
+        self.name = name
+        self.members = []
+        self.methods : List[CppMethod] = []
+
+    def add_member(self, member: CppMember):
+        self.members.append(member)
+
+    def add_method(self, method: CppMethod):
+        self.methods.append(method)
+
+    def generate_header_content(self):
+        return generate_header_content_for_class_or_struct(False, self.name, self.members, self.methods)
+
+    def generate_source_content(self):
+        return generate_source_content_for_class_or_struct(self.name, self.methods)
+
 class CppHeaderAndSource:
 
     def __init__(self, name: str):
         self.name = name
-        self.structs: List[CppStruct] = []
         self.includes: List[str] = []
+        self.extra_header_code: List[str] = []
+        self.structs: List[CppStruct] = []
         self.classes: List[CppClass] = []
+
+    def add_extra_header_code(self, extra_header_code:str) -> None:
+        self.extra_header_code.append(extra_header_code)
 
     def add_include(self, include: str) -> None:
         self.includes.append(include)
@@ -226,6 +261,11 @@ class CppHeaderAndSource:
 
         for struct in self.structs:
             header_file_content += struct.generate_header_content();
+
+        for header_code in self.extra_header_code:
+            header_file_content += header_code
+
+        header_file_content += "\n\n"
 
         for cls in self.classes:
             header_file_content += cls.generate_header_content();

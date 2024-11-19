@@ -1,3 +1,4 @@
+from re import sub
 from cppclass import *
 from enum import Enum, auto;
 from dataclasses import dataclass
@@ -33,6 +34,38 @@ def snake_to_camel_case(snake_str):
 def get_draw_data_struct_name(shader_type: ShaderType):
     return snake_to_camel_case(shader_type.name) + "DrawData"
 
+def generate_hashing_code_for_draw_data(vertex_attributes, shader_type) -> str:
+
+    sub_hash_variables = []
+    bit_shifted_hashes = []
+    
+    # hacking in the index.
+    vertex_attributes.insert(0, ShaderVertexAttributeVariable.INDEX)
+
+    for i, vertex_attribute in enumerate(vertex_attributes):
+        va_data = shader_vertex_attribute_to_data[vertex_attribute]
+        sub_hash_variables.append(f"{2 * TAB}size_t h{i} = std::hash<std::vector<{va_data.attrib_type}>>().operator()(data.{va_data.plural_name});");
+        if i == 0:
+            bit_shifted_hashes.append(f"h0");
+        else:
+            bit_shifted_hashes.append(f"(h{i} << {i})");
+
+
+    hashing_code = f"""
+namespace std {{
+template <> struct hash<{get_draw_data_struct_name(shader_type)}> {{
+    size_t operator()(const {get_draw_data_struct_name(shader_type)} &data) const {{
+
+{'\n'.join(sub_hash_variables)}
+
+        // combine all hash values using XOR and shifting for better distribution
+        return {" ^ ".join(bit_shifted_hashes)};
+    }}
+}};
+}} // namespace std
+"""
+    return hashing_code
+
 class ShaderBatcherCppStruct:
     def __init__(self, shader_type: ShaderType, vertex_attributes : List[ShaderVertexAttributeVariable]):
         self.shader_type = shader_type
@@ -54,11 +87,9 @@ class ShaderBatcherCppStruct:
 
         equals_body = "return " + " && ".join(equals_body_comparisons) + ";"
         
-        cpp_struct.add_method(CppMethod("operator==", "bool", f"const {struct_name} &other", equals_body))
+        cpp_struct.add_method(CppMethod("operator==", "bool", f"const {struct_name} &other", equals_body, define_in_header=True, qualifiers=["const"]))
 
         return cpp_struct
-
-
 
 class ShaderBatcherCppClass:
     def __init__(self, shader_type: ShaderType, vertex_attributes : List[ShaderVertexAttributeVariable]):
@@ -75,6 +106,8 @@ class ShaderBatcherCppClass:
             parameter_list += f"const std::vector<{data.attrib_type}> &{data.plural_name}, "
         parameter_list = parameter_list[:-2] # remove space comma
         return parameter_list
+
+
 
     def generate_constructor_body(self) -> str:
         body = ""
@@ -103,8 +136,7 @@ class ShaderBatcherCppClass:
            data = shader_vertex_attribute_to_data[vertex_attribute]
            buffer_object_var_name = f"{data.plural_name}_buffer_object"
            body += f"""
-    glDeleteBuffers(1, &{buffer_object_var_name});
-           """
+    glDeleteBuffers(1, &{buffer_object_var_name});"""
         return body
 
     def generate_queue_draw_body(self) -> str:
@@ -130,46 +162,62 @@ class ShaderBatcherCppClass:
     auto data_with_relative_indices = new_data;
     unsigned int largest_index_in_current_data = 0;
 
-    // Adjust indices and find the largest index in the current data
-    for (unsigned int &index : data_with_relative_indices.indices) {{
-        index += largest_index_used_so_far;
-        if (index > largest_index_in_current_data) {{
-            largest_index_in_current_data = index;
-        }}
+    bool incoming_data_is_already_cached =
+        cached_draw_data_to_indices.find(new_data) != cached_draw_data_to_indices.end();
+
+    /*auto data_with_relative_indices = new_data;*/
+    /**/
+
+    bool logging = false;
+
+    if (logging) {{
+        std::cout << "VVV QUEUE_DRAW VVV" << std::endl;
     }}
 
-
-    // Check if it's already cached
-    auto cached_pos_it = std::find(cached_draw_data.begin(), cached_draw_data.end(), new_data);
-    if (cached_pos_it != cached_draw_data.end()) {{
-        // It's cached, but not yet in the set of things to draw this tick
-        auto draw_it = std::find(draw_data_this_tick.begin(),
-                                 draw_data_this_tick.end(), new_data);
-        if (draw_it == draw_data_this_tick.end()) {{
-            // notice that we push the relative indices
-            draw_data_this_tick.push_back(data_with_relative_indices);
+    if (incoming_data_is_already_cached) {{
+        draw_data_this_tick.push_back(new_data);
+        if (logging) {{
+            std::cout << "incoming data is already cached" << std::endl;
         }}
+        std::cout << "incoming data is already cached" << std::endl;
     }} else {{
+
+        if (logging) {{
+            std::cout << "incoming data is not already cached" << std::endl;
+        }}
+        std::cout << "incoming data is not already cached" << std::endl;
+
+        // Adjust indices and find the largest index in the current data
+        unsigned int largest_index_in_current_data = 0;
+        std::vector<unsigned int> cached_indices_for_data;
+        for (unsigned int index : new_data.indices) {{
+            unsigned int cached_index = index + largest_index_used_so_far;
+            cached_indices_for_data.push_back(cached_index);
+            // potentially update the largest index we've seen
+            // we have an if because indices are out of order based on geom
+            if (cached_index > largest_index_in_current_data) {{
+                largest_index_in_current_data = cached_index;
+            }}
+        }}
 
         // suppose the above indices has 0, 1, 2, 3 in some order, and the largest index so far was equal to
         // 72, then the the largest index so far would now be 75 as it reaches it, but we need to make sure on the next
         // iteration that we don't collide with 75 again, so +1, (collision happens if there is a 0 index)
         largest_index_used_so_far = largest_index_in_current_data + 1;
 
-        glBindVertexArray(vertex_attribute_object);
+        cached_draw_data_to_indices.insert({{new_data, cached_indices_for_data}});
+        draw_data_this_tick.push_back(new_data);
 
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indices_buffer_object);
-        glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, curr_index_buffer_offset * sizeof(unsigned int), data_with_relative_indices.indices.size() * sizeof(unsigned int), data_with_relative_indices.indices.data());
-        curr_index_buffer_offset +=  data_with_relative_indices.indices.size(); 
+        glBindVertexArray(vertex_attribute_object);
 
 {generate_sub_buffering_calls()}
 
         glBindVertexArray(0);
-
-        cached_draw_data.push_back(new_data);
-        draw_data_this_tick.push_back(data_with_relative_indices);
     }}
 
+    if (logging) {{
+        std::cout << "^^^ QUEUE_DRAW ^^^" << std::endl;
+    }}
         """
         return body
 
@@ -189,21 +237,44 @@ class ShaderBatcherCppClass:
 
     def generate_draw_everything_body(self) -> str:
         body = f"""
+
+    bool logging = false;
+
+    if (logging) {{
+        std::cout << "VVV DRAW_EVERYTHING VVV" << std::endl;
+    }}
+
     shader_cache.use_shader_program(ShaderType::{self.shader_type.name});
     glBindVertexArray(vertex_attribute_object);
 
-    // Concatenate all indices into a single vector for drawing
+
     std::vector<unsigned int> all_indices;
     for (const auto &draw_data : draw_data_this_tick) {{
-        const std::vector<unsigned int> &indices = draw_data.indices;
-        all_indices.insert(all_indices.end(), indices.begin(), indices.end());
+        auto it = cached_draw_data_to_indices.find(draw_data);
+        if (it != cached_draw_data_to_indices.end()) {{
+            const std::vector<unsigned int> &cached_indices = it->second;
+            all_indices.insert(all_indices.end(), cached_indices.begin(), cached_indices.end());
+        }} else {{
+            if (logging) {{
+                std::cerr << "draw data tried to be drawn but was not cached, look into this as it should not occur"
+                          << std::endl;
+            }}
+        }}
     }}
 
-    // TODO we probably actually have to do something with indices here...
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indices_buffer_object);
+    glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, all_indices.size() * sizeof(unsigned int), all_indices.data());
 
     glDrawElements(GL_TRIANGLES, all_indices.size(), GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
     shader_cache.stop_using_shader_program();
+
+    draw_data_this_tick.clear();
+
+    if (logging) {{
+        std::cout << "^^^ DRAW_EVERYTHING ^^^" << std::endl;
+    }}
     """
 
         return body
@@ -228,7 +299,7 @@ class ShaderBatcherCppClass:
             batcher_class.add_member(CppMember(f"curr_{va_data.singular_name}_buffer_offset", "unsigned int", "0"))
 
         batcher_class.add_member(CppMember("draw_data_this_tick", f"std::vector<{get_draw_data_struct_name(self.shader_type)}>"))
-        batcher_class.add_member(CppMember("cached_draw_data", f"std::vector<{get_draw_data_struct_name(self.shader_type)}>"))
+        batcher_class.add_member(CppMember("cached_draw_data_to_indices", f"std::unordered_map<{get_draw_data_struct_name(self.shader_type)}, std::vector<unsigned int>>"))
 
         batcher_class.add_constructor("ShaderCache& shader_cache", "shader_cache(shader_cache)", f"""
     glGenVertexArrays(1, &vertex_attribute_object);
@@ -397,7 +468,7 @@ if __name__ == "__main__":
 
             shader_batcher_header_and_source = CppHeaderAndSource(f"{shader_type.name.lower()}_shader_batcher")
 
-            shader_batcher_header_and_source.add_include('#include <iostream>\n#include <string>\n#include "../sbpt_generated_includes.hpp"\n\n');
+            shader_batcher_header_and_source.add_include('#include <iostream>\n#include <string>\n#include "../hashing.hpp"\n#include "../sbpt_generated_includes.hpp"\n\n');
 
             shader_batcher = ShaderBatcherCppClass(shader_type, vertex_attributes)
             batcher_class = shader_batcher.generate_cpp_class()
@@ -406,6 +477,8 @@ if __name__ == "__main__":
             shader_batcher_draw_info_struct = ShaderBatcherCppStruct(shader_type, vertex_attributes)
             struct = shader_batcher_draw_info_struct.generate_cpp_struct()
             shader_batcher_header_and_source.add_struct(struct)
+
+            shader_batcher_header_and_source.add_extra_header_code(generate_hashing_code_for_draw_data(vertex_attributes, shader_type))
 
             source_content = shader_batcher_header_and_source.generate_source_content()
             header_content = shader_batcher_header_and_source.generate_header_content()
