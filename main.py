@@ -34,38 +34,6 @@ def snake_to_camel_case(snake_str):
 def get_draw_data_struct_name(shader_type: ShaderType):
     return snake_to_camel_case(shader_type.name) + "DrawData"
 
-def generate_hashing_code_for_draw_data(vertex_attributes, shader_type) -> str:
-
-    sub_hash_variables = []
-    bit_shifted_hashes = []
-    
-    # hacking in the index.
-    vertex_attributes.insert(0, ShaderVertexAttributeVariable.INDEX)
-
-    for i, vertex_attribute in enumerate(vertex_attributes):
-        va_data = shader_vertex_attribute_to_data[vertex_attribute]
-        sub_hash_variables.append(f"{2 * TAB}size_t h{i} = std::hash<std::vector<{va_data.attrib_type}>>().operator()(data.{va_data.plural_name});");
-        if i == 0:
-            bit_shifted_hashes.append(f"h0");
-        else:
-            bit_shifted_hashes.append(f"(h{i} << {i})");
-
-
-    hashing_code = f"""
-namespace std {{
-template <> struct hash<{get_draw_data_struct_name(shader_type)}> {{
-    size_t operator()(const {get_draw_data_struct_name(shader_type)} &data) const {{
-
-{'\n'.join(sub_hash_variables)}
-
-        // combine all hash values using XOR and shifting for better distribution
-        return {" ^ ".join(bit_shifted_hashes)};
-    }}
-}};
-}} // namespace std
-"""
-    return hashing_code
-
 class ShaderBatcherCppStruct:
     def __init__(self, shader_type: ShaderType, vertex_attributes : List[ShaderVertexAttributeVariable]):
         self.shader_type = shader_type
