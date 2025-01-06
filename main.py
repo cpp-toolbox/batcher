@@ -55,7 +55,7 @@ class ShaderBatcherCppStruct:
 
         equals_body = "return " + " && ".join(equals_body_comparisons) + ";"
         
-        cpp_struct.add_method(CppMethod("operator==", "bool", f"const {struct_name} &other", equals_body, define_in_header=True, qualifiers=["const"]))
+        cpp_struct.add_method(CppMethod("operator==", "bool", [CppParameter("other", struct_name, "const", True)], equals_body, define_in_header=True, qualifiers=["const"]))
 
         return cpp_struct
 
@@ -67,12 +67,18 @@ class ShaderBatcherCppClass:
     def get_class_name(self) -> str:
         return f"{snake_to_camel_case(self.shader_type.name)}ShaderBatcher"
 
-    def generate_queue_draw_parameter_list(self) -> str:
-        parameter_list = "const unsigned int object_id, const std::vector<unsigned int> &indices, "
+    def generate_queue_draw_parameter_list(self) -> List[CppParameter]:
+        # parameter_list = "const unsigned int object_id, const std::vector<unsigned int> &indices, "
+        parameter_list = [
+            CppParameter("object_id", "unsigned int", "const"), 
+            CppParameter("indices", "std::vector<unsigned int>", "const", True)
+        ]
         for vertex_attribute in self.vertex_attributes:
             data = shader_vertex_attribute_to_data[vertex_attribute]
-            parameter_list += f"const std::vector<{data.attrib_type}> &{data.plural_name}, "
-        parameter_list = parameter_list[:-2] # remove space comma
+            parameter_list.append(CppParameter(data.plural_name, f"std::vector<{data.attrib_type}>", "const", True))
+            # parameter_list += f"const std::vector<{data.attrib_type}> &{data.plural_name}, "
+
+        parameter_list.append(CppParameter("replace", "bool", "", False, "false"))
         return parameter_list
 
 
@@ -127,11 +133,13 @@ class ShaderBatcherCppClass:
         body = f"""
     object_ids_this_tick.push_back(object_id);
 
-    bool incoming_data_is_already_cached =
-        cached_object_ids_to_indices.find(object_id) != cached_object_ids_to_indices.end();
+    if (not replace) {{
+        bool incoming_data_is_already_cached =
+            cached_object_ids_to_indices.find(object_id) != cached_object_ids_to_indices.end();
 
-    if (incoming_data_is_already_cached) {{
-        return;
+        if (incoming_data_is_already_cached) {{
+            return;
+        }}
     }}
 
     bool logging = false;
@@ -162,7 +170,9 @@ class ShaderBatcherCppClass:
     // iteration that we don't collide with 75 again, so +1, (collision happens if there is a 0 index)
     largest_index_used_so_far = largest_index_in_current_data + 1;
 
-    cached_object_ids_to_indices.insert({{object_id, cached_indices_for_data}});
+    // cached_object_ids_to_indices.insert({{object_id, cached_indices_for_data}});
+    // using this one as it will replace the existing data
+    cached_object_ids_to_indices.insert_or_assign(object_id, cached_indices_for_data);
     object_ids_this_tick.push_back(object_id);
 
     glBindVertexArray(vertex_attribute_object);
@@ -255,7 +265,7 @@ class ShaderBatcherCppClass:
         batcher_class.add_member(CppMember("cached_object_ids_to_indices", f"std::unordered_map<unsigned int, std::vector<unsigned int>>"))
 
 
-        batcher_class.add_constructor("ShaderCache& shader_cache", "shader_cache(shader_cache)", f"""
+        batcher_class.add_constructor([CppParameter("shader_cache", "ShaderCache", "", True )], "shader_cache(shader_cache)", f"""
     glGenVertexArrays(1, &vertex_attribute_object);
     glBindVertexArray(vertex_attribute_object);
     glGenBuffers(1, &indices_buffer_object);
@@ -266,14 +276,14 @@ class ShaderBatcherCppClass:
         
 
 
-        batcher_class.add_method(CppMethod(f"~{self.get_class_name()}", "", "", 
+        batcher_class.add_method(CppMethod(f"~{self.get_class_name()}", "", [], 
                                             self.generate_deconstructor(), "public"))
 
         batcher_class.add_method(CppMethod("queue_draw", "void", self.generate_queue_draw_parameter_list(), 
                                             self.generate_queue_draw_body(), "public"))
 
         # Add draw method
-        batcher_class.add_method(CppMethod("draw_everything", "void", "", self.generate_draw_everything_body(), "public"))
+        batcher_class.add_method(CppMethod("draw_everything", "void", [], self.generate_draw_everything_body(), "public"))
 
         return batcher_class
 
@@ -302,7 +312,7 @@ class BatcherCppClassCreator:
 
         # Add constructor with updated initializer list
         # batcher_class.add_constructor("ShaderCache& shader_cache", initializer_list, "requested_shaders = {\n" + ",\n".join(requested_shader_types) + f"\n{TAB}}};")
-        batcher_class.add_constructor("ShaderCache& shader_cache", initializer_list, "")
+        batcher_class.add_constructor([CppParameter("shader_cache", "ShaderCache", "", True )], initializer_list, "")
 
         return batcher_class
     

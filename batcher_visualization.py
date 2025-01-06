@@ -1,4 +1,3 @@
-
 class Printer:
     def __init__(self, array_size=10, logging_enabled=False):
         self.fixed_array = FixedSizeArray(array_size, logging_enabled)
