@@ -1,0 +1,253 @@
+#include <iostream>
+#include <optional>
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <stdexcept>
+#include <algorithm>
+#include <sstream>
+
+class FixedSizeArrayTracker {
+private:
+    size_t size;
+    bool logging_enabled;
+    std::unordered_map<std::string, std::pair<size_t, size_t>> metadata;
+
+    void log(const std::string &message) const {
+        if (logging_enabled) {
+            std::cout << "[LOG]: " << message << "\n";
+            std::cout << *this << "\n";
+        }
+    }
+
+public:
+    FixedSizeArrayTracker(size_t size, bool logging_enabled = false)
+        : size(size), logging_enabled(logging_enabled) {}
+
+    std::optional<size_t> find_space(size_t length) {
+        size_t empty_start = 0;
+        size_t empty_count = 0;
+
+        for (size_t i = 0; i < size; ++i) {
+            bool is_occupied = false;
+            for (const auto &[_, range] : metadata) {
+                size_t start = range.first;
+                size_t len = range.second;
+                if (i >= start && i < start + len) {
+                    is_occupied = true;
+                    break;
+                }
+            }
+
+            if (is_occupied) {
+                empty_start = i + 1;
+                empty_count = 0;
+            } else {
+                ++empty_count;
+                if (empty_count == length) {
+                    return empty_start;
+                }
+            }
+        }
+
+        return std::nullopt;
+    }
+
+    void add_metadata(const std::string &id, size_t start, size_t length) {
+        if (metadata.count(id)) {
+            log("ID '" + id + "' already exists. Use a unique ID.");
+            return;
+        }
+
+        if (start + length > size) {
+            log("Error: Metadata exceeds array bounds.");
+            return;
+        }
+
+        metadata[id] = {start, length};
+        log("Added metadata: ID=" + id + ", start=" + std::to_string(start) + ", length=" + std::to_string(length));
+    }
+
+    void remove_metadata(const std::string &id) {
+        if (metadata.erase(id)) {
+            log("Removed metadata for ID=" + id);
+        } else {
+            log("ID '" + id + "' not found.");
+        }
+    }
+
+    std::optional<std::pair<size_t, size_t>> get_metadata(const std::string &id) const {
+        auto it = metadata.find(id);
+        if (it != metadata.end()) {
+            return it->second;
+        }
+        return std::nullopt;
+    }
+
+    void compact() {
+        size_t current_index = 0;
+        std::unordered_map<std::string, std::pair<size_t, size_t>> new_metadata;
+
+        for (const auto &[id, range] : metadata) {
+            size_t length = range.second;
+            new_metadata[id] = {current_index, length};
+            current_index += length;
+        }
+
+        metadata = std::move(new_metadata);
+        log("Compacted metadata.");
+    }
+
+    const std::unordered_map<std::string, std::pair<size_t, size_t>> &get_all_metadata() const {
+        return metadata;
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const FixedSizeArrayTracker &tracker) {
+        os << "Metadata: {";
+        for (const auto &[id, range] : tracker.metadata) {
+            os << id << ": (start=" << range.first << ", length=" << range.second << "), ";
+        }
+        os << "}";
+        return os;
+    }
+};
+
+class FixedSizeArrayStorage {
+private:
+    std::vector<char> array;
+
+public:
+    FixedSizeArrayStorage(size_t size) : array(size, '\0') {}
+
+    void add_data(size_t start, const std::string &string) {
+        for (size_t i = 0; i < string.size(); ++i) {
+            array[start + i] = string[i];
+        }
+    }
+
+    void remove_data(size_t start, size_t length) {
+        for (size_t i = 0; i < length; ++i) {
+            array[start + i] = '\0';
+        }
+    }
+
+    std::string get_data(size_t start, size_t length) const {
+        return std::string(array.begin() + start, array.begin() + start + length);
+    }
+
+    void compact(const std::unordered_map<std::string, std::pair<size_t, size_t>> &new_metadata) {
+        std::vector<char> new_array(array.size(), '\0');
+
+        for (const auto &[id, range] : new_metadata) {
+            size_t start = range.first;
+            size_t length = range.second;
+            for (size_t i = 0; i < length; ++i) {
+                new_array[start + i] = array[start + i];
+            }
+        }
+
+        array = std::move(new_array);
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const FixedSizeArrayStorage &storage) {
+        for (char c : storage.array) {
+            os << (c ? c : '_');
+        }
+        return os;
+    }
+};
+
+class FixedSizeArray {
+private:
+    FixedSizeArrayTracker tracker;
+    FixedSizeArrayStorage storage;
+
+public:
+    FixedSizeArray(size_t size, bool logging_enabled = false)
+        : tracker(size, logging_enabled), storage(size) {}
+
+    void add(const std::string &id, const std::string &string) {
+        auto metadata = tracker.get_metadata(id);
+        if (metadata) {
+            storage.remove_data(metadata->first, metadata->second);
+            tracker.remove_metadata(id);
+        }
+
+        size_t length = string.size();
+        auto start = tracker.find_space(length);
+
+        if (!start) {
+            tracker.compact();
+            storage.compact(tracker.get_all_metadata());
+            start = tracker.find_space(length);
+            if (!start) {
+                throw std::runtime_error("Not enough space in the array to store the string.");
+            }
+        }
+
+        storage.add_data(*start, string);
+        tracker.add_metadata(id, *start, length);
+    }
+
+    std::string get(const std::string &id) const {
+        auto metadata = tracker.get_metadata(id);
+        if (!metadata) {
+            return "";
+        }
+        return storage.get_data(metadata->first, metadata->second);
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const FixedSizeArray &array) {
+        os << array.storage << "\n" << array.tracker;
+        return os;
+    }
+};
+
+class Printer {
+private:
+    FixedSizeArray fixed_array;
+    std::vector<std::string> queue;
+
+public:
+    Printer(size_t array_size = 10, bool logging_enabled = false)
+        : fixed_array(array_size, logging_enabled) {}
+
+    void queue_print(const std::string &id, const std::string &string, bool replace = false) {
+        if (replace) {
+            fixed_array.add(id, string);
+        } else {
+            auto metadata = fixed_array.get(id);
+            if (metadata.empty()) {
+                fixed_array.add(id, string);
+            }
+        }
+        queue.push_back(id);
+    }
+
+    void print_everything() {
+        std::cout << "=== PRINTING EVERYTHING ===\n";
+        for (const auto &id : queue) {
+            std::string string = fixed_array.get(id);
+            if (!string.empty()) {
+                std::cout << "ID '" << id << "': " << string << "\n";
+            } else {
+                std::cout << "ID '" << id << "' has no associated string.\n";
+            }
+        }
+        queue.clear();
+    }
+};
+
+int main() {
+    Printer printer(10, true);
+
+    printer.queue_print("id1", "aaa");
+    printer.queue_print("id2", "bbb");
+    printer.print_everything();
+
+    printer.queue_print("id3", "cc", true);
+    printer.queue_print("id1", "ddd", true);
+    printer.print_everything();
+
+    return 0;
+}

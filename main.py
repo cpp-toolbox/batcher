@@ -120,8 +120,7 @@ class ShaderBatcherCppClass:
             for v in self.vertex_attributes:
                 sva_data = shader_vertex_attribute_to_data[v]
                 lines.append(f"glBindBuffer(GL_ARRAY_BUFFER, {sva_data.plural_name}_buffer_object);")
-                lines.append(f"glBufferSubData(GL_ARRAY_BUFFER, curr_{sva_data.singular_name}_buffer_offset * sizeof({sva_data.attrib_type}), {sva_data.plural_name}.size() * sizeof({sva_data.attrib_type}), {sva_data.plural_name}.data());")
-                lines.append(f"curr_{sva_data.singular_name}_buffer_offset += {sva_data.plural_name}.size();")
+                lines.append(f"glBufferSubData(GL_ARRAY_BUFFER, *start_index * sizeof({sva_data.attrib_type}), {sva_data.plural_name}.size() * sizeof({sva_data.attrib_type}), {sva_data.plural_name}.data());")
                 lines.append("\n")
 
             indentation = TAB 
@@ -131,55 +130,70 @@ class ShaderBatcherCppClass:
             return '\n'.join(lines)
 
         body = f"""
-    object_ids_this_tick.push_back(object_id);
-
-    if (not replace) {{
-        bool incoming_data_is_already_cached =
-            cached_object_ids_to_indices.find(object_id) != cached_object_ids_to_indices.end();
-
-        if (incoming_data_is_already_cached) {{
-            return;
-        }}
-    }}
-
     bool logging = false;
 
-    if (logging) {{
-        std::cout << "VVV QUEUE_DRAW VVV" << std::endl;
+    object_ids_this_tick.push_back(object_id);
+
+    bool incoming_data_is_already_cached =
+        cached_object_ids_to_indices.find(object_id) != cached_object_ids_to_indices.end();
+
+    if (incoming_data_is_already_cached and not replace) {{
+        return;
     }}
 
-    if (logging) {{
-        std::cout << "incoming data is not already cached" << std::endl;
+    // therefore the data is either not cached, or it needs to be replaced
+    // in both of those cases the data needs to be stored, so moving on:
+
+    // if the data already exists then we need to replace
+    auto metadata = fsat.get_metadata(object_id);
+    if (metadata) {{
+        // so mark that space as free, and it only needs to occur in the realm of metadata
+        // later on we'll just clobber the real contents of the VBO which is not a problem
+        fsat.remove_metadata(object_id);
     }}
 
-    // Adjust indices and find the largest index in the current data
-    unsigned int largest_index_in_current_data = 0;
-    std::vector<unsigned int> cached_indices_for_data;
-    for (unsigned int index : indices) {{
-        unsigned int cached_index = index + largest_index_used_so_far;
-        cached_indices_for_data.push_back(cached_index);
-        // potentially update the largest index we've seen
-        // we have an if because indices are out of order based on geom
-        if (cached_index > largest_index_in_current_data) {{
-            largest_index_in_current_data = cached_index;
+    // note we use positions because that information is what gets stored into the vertex buffer objects
+    // note that any other vertex data could be used as they must all have the same size
+    size_t length = positions.size();
+    auto start_index = fsat.find_contiguous_space(length);
+
+    // if there's no space left we will compactify things, and try again.
+    if (!start_index) {{
+        fsat.compact();
+        // TODO implement later when running out of space is a real issue.
+        // storage.compact(tracker.get_all_metadata());
+        start_index = fsat.find_contiguous_space(length);
+        if (!start_index) {{
+            throw std::runtime_error("not enough space even after compacting.");
         }}
     }}
 
-    // suppose the above indices has 0, 1, 2, 3 in some order, and the largest index so far was equal to
-    // 72, then the the largest index so far would now be 75 as it reaches it, but we need to make sure on the next
-    // iteration that we don't collide with 75 again, so +1, (collision happens if there is a 0 index)
-    largest_index_used_so_far = largest_index_in_current_data + 1;
+    // at this point it's guarenteed that there is space for the object.
+    // therefore *start_index is competely valid from now on
 
-    // cached_object_ids_to_indices.insert({{object_id, cached_indices_for_data}});
-    // using this one as it will replace the existing data
+    std::vector<unsigned int> cached_indices_for_data;
+    for (unsigned int index : indices) {{
+        // note that it's guarenteed that cached_index is going to reside completely
+        // within the allocated space this is because if the size of the positions vector
+        // is given by N, then the indices are only allowed to be values of 0, ..., N - 1
+        // then we move it up by start_index, and thus we're always within start_index + N - 1
+        // which it the amount of space we found during our find_contiguous space call
+        unsigned int cached_index = index + *start_index;
+        cached_indices_for_data.push_back(cached_index);
+    }}
+
+    // using this one as it will replace the existing data, thus works for replacement or first time insertion.
     cached_object_ids_to_indices.insert_or_assign(object_id, cached_indices_for_data);
-    object_ids_this_tick.push_back(object_id);
 
+    // now we put that data into the graphics card
     glBindVertexArray(vertex_attribute_object);
 
 {generate_sub_buffering_calls()}
 
     glBindVertexArray(0);
+
+    // ok now we're done, update the metadata so that we know this space is used up
+    fsat.add_metadata(object_id, *start_index, length);
 
     if (logging) {{
         std::cout << "^^^ QUEUE_DRAW ^^^" << std::endl;
@@ -238,12 +252,12 @@ class ShaderBatcherCppClass:
         return body
 
     def generate_cpp_class(self) -> CppClass:
-        # Create the Batcher class
         batcher_class = CppClass(self.get_class_name())
 
         batcher_class.add_member(CppMember("shader_cache", "ShaderCache"))
         batcher_class.add_member(CppMember("vertex_attribute_object", "GLuint"))
         batcher_class.add_member(CppMember("indices_buffer_object", "GLuint"))
+
         # add vector for each thing this shader type has
         for vertex_attribute in self.vertex_attributes:
             va_data = shader_vertex_attribute_to_data[vertex_attribute]
@@ -252,20 +266,15 @@ class ShaderBatcherCppClass:
 
         batcher_class.add_member(CppMember("curr_index_buffer_offset", "unsigned int", "0"))
         batcher_class.add_member(CppMember("largest_index_used_so_far", "unsigned int", "0"))
-        for vertex_attribute in self.vertex_attributes:
-            va_data = shader_vertex_attribute_to_data[vertex_attribute]
-            batcher_class.add_member(CppMember(f"curr_{va_data.singular_name}_buffer_offset", "unsigned int", "0"))
-
-        # batcher_class.add_member(CppMember("draw_data_this_tick", f"std::vector<{get_draw_data_struct_name(self.shader_type)}>"))
-        # batcher_class.add_member(CppMember("cached_draw_data_to_indices", f"std::unordered_map<{get_draw_data_struct_name(self.shader_type)}, std::vector<unsigned int>>"))
 
         batcher_class.add_member(CppMember("object_ids_this_tick", f"std::vector<unsigned int>"))
         batcher_class.add_member(CppMember("object_ids_last_tick", f"std::vector<unsigned int>"))
         batcher_class.add_member(CppMember("drawn_indices_last_tick", f"std::vector<unsigned int>"));
         batcher_class.add_member(CppMember("cached_object_ids_to_indices", f"std::unordered_map<unsigned int, std::vector<unsigned int>>"))
 
+        batcher_class.add_member(CppMember("fsat", f"FixedSizeArrayTracker"))
 
-        batcher_class.add_constructor([CppParameter("shader_cache", "ShaderCache", "", True )], "shader_cache(shader_cache)", f"""
+        batcher_class.add_constructor([CppParameter("shader_cache", "ShaderCache", "", True )], "shader_cache(shader_cache), fsat(10000000)", f"""
     glGenVertexArrays(1, &vertex_attribute_object);
     glBindVertexArray(vertex_attribute_object);
     glGenBuffers(1, &indices_buffer_object);
@@ -282,7 +291,6 @@ class ShaderBatcherCppClass:
         batcher_class.add_method(CppMethod("queue_draw", "void", self.generate_queue_draw_parameter_list(), 
                                             self.generate_queue_draw_body(), "public"))
 
-        # Add draw method
         batcher_class.add_method(CppMethod("draw_everything", "void", [], self.generate_draw_everything_body(), "public"))
 
         return batcher_class
@@ -432,7 +440,7 @@ if __name__ == "__main__":
 
             shader_batcher_header_and_source = CppHeaderAndSource(f"{shader_type.name.lower()}_shader_batcher")
 
-            shader_batcher_header_and_source.add_include('#include <iostream>\n#include <string>\n#include "../sbpt_generated_includes.hpp"\n\n');
+            shader_batcher_header_and_source.add_include('#include <iostream>\n#include <string>\n#include "../fixed_size_array_tracker.hpp"\n#include "../sbpt_generated_includes.hpp"\n\n');
 
             shader_batcher = ShaderBatcherCppClass(shader_type, vertex_attributes)
             batcher_class = shader_batcher.generate_cpp_class()
