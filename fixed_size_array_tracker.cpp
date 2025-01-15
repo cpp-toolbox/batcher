@@ -1,5 +1,6 @@
 #include "fixed_size_array_tracker.hpp"
 #include <vector>
+#include <string>
 
 FixedSizeArrayTracker::FixedSizeArrayTracker(unsigned int size, bool logging_enabled)
     : size(size), logging_enabled(logging_enabled) {}
