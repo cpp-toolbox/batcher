@@ -195,6 +195,8 @@ class ShaderBatcherCppClass:
     // ok now we're done, update the metadata so that we know this space is used up
     fsat.add_metadata(object_id, *start_index, length);
 
+    replaced_data_for_an_object_this_tick = true;
+
     if (logging) {{
         std::cout << "^^^ QUEUE_DRAW ^^^" << std::endl;
     }}
@@ -213,8 +215,7 @@ class ShaderBatcherCppClass:
     shader_cache.use_shader_program(ShaderType::{self.shader_type.name});
     glBindVertexArray(vertex_attribute_object);
 
-    if (object_ids_this_tick != object_ids_last_tick) {{
-
+    if (replaced_data_for_an_object_this_tick or object_ids_this_tick != object_ids_last_tick) {{
         std::vector<unsigned int> all_indices;
         for (const auto &draw_data : object_ids_this_tick) {{
             auto it = cached_object_ids_to_indices.find(draw_data);
@@ -243,6 +244,7 @@ class ShaderBatcherCppClass:
     shader_cache.stop_using_shader_program();
 
     object_ids_this_tick.clear();
+    replaced_data_for_an_object_this_tick = false;
 
     if (logging) {{
         std::cout << "^^^ DRAW_EVERYTHING ^^^" << std::endl;
@@ -273,6 +275,9 @@ class ShaderBatcherCppClass:
         batcher_class.add_member(CppMember("cached_object_ids_to_indices", f"std::unordered_map<unsigned int, std::vector<unsigned int>>"))
 
         batcher_class.add_member(CppMember("fsat", f"FixedSizeArrayTracker"))
+
+        batcher_class.add_member(CppMember("replaced_data_for_an_object_this_tick ", f"bool"))
+
 
         batcher_class.add_constructor([CppParameter("shader_cache", "ShaderCache", "", True )], "shader_cache(shader_cache), fsat(10000000)", f"""
     glGenVertexArrays(1, &vertex_attribute_object);
