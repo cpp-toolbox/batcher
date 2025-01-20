@@ -3,7 +3,9 @@ a class which helps manage batching over shaders, note that there are no source 
 
 ## setup
 1. the batcher relies on the shader standard project and you must link in `shader_standard.py` and `standard.py` in to this directory for it to operate correctly
-2. run `batcher.py` and generate the shaders you need
+2. run `batcher.py` and generate the batchers for each shaders you need
+
+**WARNING**: the `queue_draw` call parameter list order is generated based on the order of vertex attribute variables encountered in the shader file, thus if you change the order, your `queue_draw` calls will break, keep this in mind.
 
 ## how it works
 the purpose of the batcher is to reduce the number of draw calls made by opengl, the method we employ for doing that is allowing the programmer to make `queue_draw` calls that don't actually draw anything, but attempt to store the data into a bunch of pre-allocated buffers, additionally if the user is requested a `queue_draw` with the same information again, then the data that is already stored should be used instead of re-uploading that data.
