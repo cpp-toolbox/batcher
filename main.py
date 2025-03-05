@@ -293,6 +293,9 @@ class ShaderBatcherCppClass:
         batcher_class.add_method(CppMethod(f"~{self.get_class_name()}", "", [], 
                                             self.generate_deconstructor(), "public"))
 
+        batcher_class.add_method(CppMethod("delete_object", "void", [CppParameter("object_id", "unsigned int", "const")] , 
+                                            "fsat.remove_metadata(object_id);", "public"))
+
         batcher_class.add_method(CppMethod("queue_draw", "void", self.generate_queue_draw_parameter_list(), 
                                             self.generate_queue_draw_body(), "public"))
 
@@ -445,7 +448,7 @@ if __name__ == "__main__":
 
             shader_batcher_header_and_source = CppHeaderAndSource(f"{shader_type.name.lower()}_shader_batcher")
 
-            shader_batcher_header_and_source.add_include('#include <iostream>\n#include <string>\n#include "../fixed_size_array_tracker.hpp"\n#include "../sbpt_generated_includes.hpp"\n\n');
+            shader_batcher_header_and_source.add_include('#include <iostream>\n#include <string>\n#include "../fixed_size_array_tracker/fixed_size_array_tracker.hpp"\n#include "../sbpt_generated_includes.hpp"\n\n');
 
             shader_batcher = ShaderBatcherCppClass(shader_type, vertex_attributes)
             batcher_class = shader_batcher.generate_cpp_class()
