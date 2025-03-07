@@ -256,6 +256,7 @@ class ShaderBatcherCppClass:
     def generate_cpp_class(self) -> CppClass:
         batcher_class = CppClass(self.get_class_name())
 
+        batcher_class.add_member(CppMember("object_id_generator", "UniqueIDGenerator"))
         batcher_class.add_member(CppMember("shader_cache", "ShaderCache"))
         batcher_class.add_member(CppMember("vertex_attribute_object", "GLuint"))
         batcher_class.add_member(CppMember("indices_buffer_object", "GLuint"))
@@ -294,7 +295,7 @@ class ShaderBatcherCppClass:
                                             self.generate_deconstructor(), "public"))
 
         batcher_class.add_method(CppMethod("delete_object", "void", [CppParameter("object_id", "unsigned int", "const")] , 
-                                            "fsat.remove_metadata(object_id);", "public"))
+                                            "fsat.remove_metadata(object_id); object_id_generator.reclaim_id(object_id); cached_object_ids_to_indices.erase(object_id);", "public"))
 
         batcher_class.add_method(CppMethod("queue_draw", "void", self.generate_queue_draw_parameter_list(), 
                                             self.generate_queue_draw_body(), "public"))
