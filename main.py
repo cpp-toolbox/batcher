@@ -253,8 +253,25 @@ class ShaderBatcherCppClass:
 
         return body
 
+    # NOTE: this is the main entry point to generating each batcher
     def generate_cpp_class(self) -> CppClass:
         batcher_class = CppClass(self.get_class_name())
+
+        ubo_shader_types = [
+            ShaderType.CWL_V_TRANSFORMATION_UBOS_1024_WITH_SOLID_COLOR,
+            ShaderType.CWL_V_TRANSFORMATION_UBOS_1024_WITH_COLORED_VERTEX,
+            ShaderType.CWL_V_TRANSFORMATION_UBOS_1024_WITH_OBJECT_ID,
+            ShaderType.TEXTURE_PACKER_CWL_V_TRANSFORMATION_UBOS_1024,
+            ShaderType.TEXTURE_PACKER_CWL_V_TRANSFORMATION_UBOS_1024_AMBIENT_AND_DIFFUSE_LIGHTING,
+            ShaderType.TEXTURE_PACKER_CWL_V_TRANSFORMATION_UBOS_1024_MULTIPLE_LIGHTS
+        ]
+
+        is_ubo_1024_shader : bool = self.shader_type in ubo_shader_types
+
+        if (is_ubo_1024_shader):
+            batcher_class.add_member(CppMember("ltw_object_id_generator", "BoundedUniqueIDGenerator", "BoundedUniqueIDGenerator(1024)"))
+            batcher_class.add_member(CppMember("ltw_matrices_gl_name", "GLuint"))
+            batcher_class.add_member(CppMember("ltw_matrices[1024]", "glm::mat4"))
 
         batcher_class.add_member(CppMember("object_id_generator", "UniqueIDGenerator"))
         batcher_class.add_member(CppMember("shader_cache", "ShaderCache"))
@@ -280,7 +297,22 @@ class ShaderBatcherCppClass:
         batcher_class.add_member(CppMember("replaced_data_for_an_object_this_tick ", f"bool"))
 
 
+
+        ubo_matrices_initialization = f"""
+    for (int i = 0; i < 1024; ++i) {{
+        ltw_matrices[i] = glm::mat4(1.0f);
+    }}
+
+    glGenBuffers(1, &ltw_matrices_gl_name);
+    glBindBuffer(GL_UNIFORM_BUFFER, ltw_matrices_gl_name);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(ltw_matrices), ltw_matrices, GL_STATIC_DRAW);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, ltw_matrices_gl_name);
+
+        """
+            
+
         batcher_class.add_constructor([CppParameter("shader_cache", "ShaderCache", "", True )], "shader_cache(shader_cache), fsat(10000000)", f"""
+    { ubo_matrices_initialization if (is_ubo_1024_shader) else "" }
     glGenVertexArrays(1, &vertex_attribute_object);
     glBindVertexArray(vertex_attribute_object);
     glGenBuffers(1, &indices_buffer_object);
@@ -293,6 +325,18 @@ class ShaderBatcherCppClass:
 
         batcher_class.add_method(CppMethod(f"~{self.get_class_name()}", "", [], 
                                             self.generate_deconstructor(), "public"))
+
+        if (is_ubo_1024_shader):
+            batcher_class.add_method(CppMethod("upload_ltw_matrices", "void", [], f"""
+    glGenBuffers(1, &ltw_matrices_gl_name);
+    glBindBuffer(GL_UNIFORM_BUFFER, ltw_matrices_gl_name);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(ltw_matrices), ltw_matrices, GL_STATIC_DRAW);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, ltw_matrices_gl_name);
+            """))
+
+        # glBindBuffer(GL_UNIFORM_BUFFER, ltw_matrices_gl_name);
+        # glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(ltw_matrices), ltw_matrices);
+        # glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
         batcher_class.add_method(CppMethod("delete_object", "void", [CppParameter("object_id", "unsigned int", "const")] , 
                                             "fsat.remove_metadata(object_id); object_id_generator.reclaim_id(object_id); cached_object_ids_to_indices.erase(object_id);", "public"))
@@ -413,7 +457,6 @@ if __name__ == "__main__":
                 config_file.write(f"{shader_name}\n")
         print(f"Configuration written to {config_file_path}")
     else:
-
         if args.config_file:
             if not os.path.exists(args.config_file):
                 print(f"Configuration file {args.config_file} not found.")
@@ -435,10 +478,8 @@ if __name__ == "__main__":
 
         for shader_type, vertex_attributes in shader_to_used_vertex_attribute_variables.items():
 
-
             if shader_type not in selected_shaders:
                 continue
-
 
             header_file = f"{shader_type.name.lower()}_shader_batcher.hpp"
             constructed_header_files.append(header_file)
@@ -508,10 +549,4 @@ if __name__ == "__main__":
         print(f"Header written to {header_filename}")
         print(f"Source written to {source_filename}")
 
-        # # Print the generated C++ Batcher class
-        # print("Header Content:\n")
-        # print(header_content)
-        # 
-        # print("Source Content:\n")
-        # print(source_content)
 
