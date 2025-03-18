@@ -253,6 +253,79 @@ class ShaderBatcherCppClass:
 
         return body
 
+
+    def generate_TEXTURE_PACKER_CWL_V_TRANSFORMATION_UBOS_1024_specfic_class_data(self, batcher_class : CppClass):
+
+        indices = CppParameter("indices", "std::vector<unsigned int>")
+        xyz_positions = CppParameter("xyz_positions", "std::vector<glm::vec3>")
+
+        body = """
+
+auto packed_bullet_for_copying = draw_info::IVPTexturePacked(
+    bullet_indices, bullet_verts, bullet_sta.texture_coordinates, bullet_sta.texture_coordinates,
+    bullet_sta.packed_texture_index, bullet_sta.packed_texture_bounding_box_index, all_colors_image_path, -1);
+        """
+
+
+
+        ivptps = CppParameter("ivptps", "std::vector<draw_info::IVPTexturePacked>")
+        body = """
+        """
+
+
+        tig = CppParameter("tig_to_update", "draw_info::TransformedIVPTPGroup", "", True);
+        body = """
+tig_to_update.id = ltw_object_id_generator.get_id();
+for (auto &ivptp : tig_to_update.ivptps) {
+    // NOTE: note that we must regenerate the internal ivptp ids because we do not use instancing here and for each
+    // object we store its ltw matrices so we can't re-use the same geometry
+    ivptp.id = object_id_generator.get_id();
+}
+        """
+        batcher_class.add_method(CppMethod("update_tig_ids", "void", [tig], body, "public"))
+
+
+        const_tig = CppParameter("tig", "draw_info::TransformedIVPTPGroup", "const", True)
+        body = """
+for (const auto &ivptp : tig.ivptps) {
+    delete_object(ivptp.id);
+}
+ltw_object_id_generator.reclaim_id(tig.id);
+        """
+        batcher_class.add_method(CppMethod("delete_tig", "void", [const_tig], body, "public"))
+
+
+
+        tig = CppParameter("tig", "draw_info::TransformedIVPTPGroup")
+        replace = CppParameter("replace", "bool", "", False, "false") 
+        transform_matrix_override = CppParameter("transform_matrix_override", "glm::mat4", "", False, "glm::mat4(0)")
+        body = """
+int ltw_object_id = tig.id;
+// TODO: there will be a bug here if you try to override with the zero matrix, but you will probably never do that
+bool requested_override = transform_matrix_override != glm::mat4(0);
+if (requested_override) {
+    ltw_matrices[ltw_object_id] = transform_matrix_override;
+} else {
+    ltw_matrices[ltw_object_id] = tig.transform.get_transform_matrix();
+}
+
+for (const auto &ivptp : tig.ivptps) {
+    std::vector<unsigned int> ltw_indices(ivptp.xyz_positions.size(), ltw_object_id);
+    std::vector<int> ptis(ivptp.xyz_positions.size(), ivptp.packed_texture_index);
+    std::vector<int> ptbbi(ivptp.xyz_positions.size(), ivptp.packed_texture_bounding_box_index);
+
+    queue_draw(ivptp.id, ivptp.indices, ltw_indices, ptis, ivptp.packed_texture_coordinates, ptbbi,
+                              ivptp.xyz_positions, replace);
+}
+        """
+        batcher_class.add_method(CppMethod("queue_draw", "void", [tig, replace, transform_matrix_override] , 
+                                            body, "public"))
+
+
+    def generate_TEXTURE_PACKER_RIGGED_AND_ANIMATED_CWL_V_TRANSFORMATION_UBOS_1024_WITH_TEXTURES_specfic_class_data(self, batcher_class : CppClass):
+        pass
+
+
     # NOTE: this is the main entry point to generating each batcher
     def generate_cpp_class(self) -> CppClass:
         batcher_class = CppClass(self.get_class_name())
@@ -350,72 +423,11 @@ class ShaderBatcherCppClass:
         batcher_class.add_method(CppMethod("queue_draw", "void", self.generate_queue_draw_parameter_list(), 
                                             self.generate_queue_draw_body(), "public"))
 
-        if (is_ubo_1024_shader):
+        if (self.shader_type == ShaderType.TEXTURE_PACKER_CWL_V_TRANSFORMATION_UBOS_1024):
+            self.generate_TEXTURE_PACKER_CWL_V_TRANSFORMATION_UBOS_1024_specfic_class_data(batcher_class)
 
-            indices = CppParameter("indices", "std::vector<unsigned int>")
-            xyz_positions = CppParameter("xyz_positions", "std::vector<glm::vec3>")
-
-            body = """
-
-    auto packed_bullet_for_copying = draw_info::IVPTexturePacked(
-        bullet_indices, bullet_verts, bullet_sta.texture_coordinates, bullet_sta.texture_coordinates,
-        bullet_sta.packed_texture_index, bullet_sta.packed_texture_bounding_box_index, all_colors_image_path, -1);
-            """
-
-
-
-            ivptps = CppParameter("ivptps", "std::vector<draw_info::IVPTexturePacked>")
-            body = """
-            """
-
-
-            tig = CppParameter("tig_to_update", "draw_info::TransformedIVPTPGroup", "", True);
-            body = """
-    tig_to_update.id = ltw_object_id_generator.get_id();
-    for (auto &ivptp : tig_to_update.ivptps) {
-        // NOTE: note that we must regenerate the internal ivptp ids because we do not use instancing here and for each
-        // object we store its ltw matrices so we can't re-use the same geometry
-        ivptp.id = object_id_generator.get_id();
-    }
-            """
-            batcher_class.add_method(CppMethod("update_tig_ids", "void", [tig], body, "public"))
-
-
-            const_tig = CppParameter("tig", "draw_info::TransformedIVPTPGroup", "const", True)
-            body = """
-    for (const auto &ivptp : tig.ivptps) {
-        delete_object(ivptp.id);
-    }
-    ltw_object_id_generator.reclaim_id(tig.id);
-            """
-            batcher_class.add_method(CppMethod("delete_tig", "void", [const_tig], body, "public"))
-
-
-
-            tig = CppParameter("tig", "draw_info::TransformedIVPTPGroup")
-            replace = CppParameter("replace", "bool", "", False, "false") 
-            transform_matrix_override = CppParameter("transform_matrix_override", "glm::mat4", "", False, "glm::mat4(0)")
-            body = """
-    int ltw_object_id = tig.id;
-    // TODO: there will be a bug here if you try to override with the zero matrix, but you will probably never do that
-    bool requested_override = transform_matrix_override != glm::mat4(0);
-    if (requested_override) {
-        ltw_matrices[ltw_object_id] = transform_matrix_override;
-    } else {
-        ltw_matrices[ltw_object_id] = tig.transform.get_transform_matrix();
-    }
-
-    for (const auto &ivptp : tig.ivptps) {
-        std::vector<unsigned int> ltw_indices(ivptp.xyz_positions.size(), ltw_object_id);
-        std::vector<int> ptis(ivptp.xyz_positions.size(), ivptp.packed_texture_index);
-        std::vector<int> ptbbi(ivptp.xyz_positions.size(), ivptp.packed_texture_bounding_box_index);
-
-        queue_draw(ivptp.id, ivptp.indices, ltw_indices, ptis, ivptp.packed_texture_coordinates, ptbbi,
-                                  ivptp.xyz_positions, replace);
-    }
-            """
-            batcher_class.add_method(CppMethod("queue_draw", "void", [tig, replace, transform_matrix_override] , 
-                                                body, "public"))
+        if (self.shader_type == ShaderType.TEXTURE_PACKER_RIGGED_AND_ANIMATED_CWL_V_TRANSFORMATION_UBOS_1024_WITH_TEXTURES ):
+            self.generate_TEXTURE_PACKER_CWL_V_TRANSFORMATION_UBOS_1024_specfic_class_data(batcher_class)
 
 
         batcher_class.add_method(CppMethod("draw_everything", "void", [], self.generate_draw_everything_body(), "public"))
