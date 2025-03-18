@@ -323,7 +323,42 @@ for (const auto &ivptp : tig.ivptps) {
 
 
     def generate_TEXTURE_PACKER_RIGGED_AND_ANIMATED_CWL_V_TRANSFORMATION_UBOS_1024_WITH_TEXTURES_specfic_class_data(self, batcher_class : CppClass):
-        pass
+        tig = CppParameter("tig", "draw_info::TransformedIVPNTPRGroup", "", True)
+        replace = CppParameter("replace", "bool", "", False, "false") 
+        transform_matrix_override = CppParameter("transform_matrix_override", "glm::mat4", "", False, "glm::mat4(0)")
+        body = """
+    for (auto &ivpntpr : tig.ivpntprs) {
+        // Populate bone_indices and bone_weights
+        std::vector<glm::ivec4> bone_indices;
+        std::vector<glm::vec4> bone_weights;
+
+        for (const auto &vertex_bone_data : ivpntpr.bone_data) {
+            glm::ivec4 indices(static_cast<int>(vertex_bone_data.indices_of_bones_that_affect_this_vertex[0]),
+                               static_cast<int>(vertex_bone_data.indices_of_bones_that_affect_this_vertex[1]),
+                               static_cast<int>(vertex_bone_data.indices_of_bones_that_affect_this_vertex[2]),
+                               static_cast<int>(vertex_bone_data.indices_of_bones_that_affect_this_vertex[3]));
+
+            glm::vec4 weights(vertex_bone_data.weight_value_of_this_vertex_wrt_bone[0],
+                              vertex_bone_data.weight_value_of_this_vertex_wrt_bone[1],
+                              vertex_bone_data.weight_value_of_this_vertex_wrt_bone[2],
+                              vertex_bone_data.weight_value_of_this_vertex_wrt_bone[3]);
+
+            bone_indices.push_back(indices);
+            bone_weights.push_back(weights);
+        }
+
+        std::vector<int> packed_texture_indices(ivpntpr.xyz_positions.size(), ivpntpr.packed_texture_index);
+        std::vector<int> packed_texture_bounding_box_indices(ivpntpr.xyz_positions.size(), ivpntpr.packed_texture_bounding_box_index);
+
+        std::vector<unsigned int> ltw_indices(ivpntpr.xyz_positions.size(), tig.id);
+
+         queue_draw(ivpntpr.id, ivpntpr.indices, ltw_indices, bone_indices, bone_weights,
+                        packed_texture_indices, ivpntpr.packed_texture_coordinates,
+                        packed_texture_bounding_box_indices, ivpntpr.xyz_positions);
+    }
+        """
+        batcher_class.add_method(CppMethod("queue_draw", "void", [tig, replace, transform_matrix_override] , 
+                                            body, "public"))
 
 
     # NOTE: this is the main entry point to generating each batcher
@@ -427,7 +462,7 @@ for (const auto &ivptp : tig.ivptps) {
             self.generate_TEXTURE_PACKER_CWL_V_TRANSFORMATION_UBOS_1024_specfic_class_data(batcher_class)
 
         if (self.shader_type == ShaderType.TEXTURE_PACKER_RIGGED_AND_ANIMATED_CWL_V_TRANSFORMATION_UBOS_1024_WITH_TEXTURES ):
-            self.generate_TEXTURE_PACKER_CWL_V_TRANSFORMATION_UBOS_1024_specfic_class_data(batcher_class)
+            self. generate_TEXTURE_PACKER_RIGGED_AND_ANIMATED_CWL_V_TRANSFORMATION_UBOS_1024_WITH_TEXTURES_specfic_class_data(batcher_class)
 
 
         batcher_class.add_method(CppMethod("draw_everything", "void", [], self.generate_draw_everything_body(), "public"))
