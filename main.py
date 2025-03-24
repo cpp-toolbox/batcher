@@ -412,6 +412,8 @@ for (const auto &ivptp : tig.ivptps) {
 
         # CLASS METHODS START
 
+
+
         ubo_matrices_initialization = f"""
     for (int i = 0; i < 1024; ++i) {{
         ltw_matrices[i] = glm::mat4(1.0f);
@@ -425,13 +427,14 @@ for (const auto &ivptp : tig.ivptps) {
         """
             
 
-        batcher_class.add_constructor([CppParameter("shader_cache", "ShaderCache", "", True )], "shader_cache(shader_cache), fsat(10000000)", f"""
+        number_of_elements_in_each_buffer = 100000;
+        batcher_class.add_constructor([CppParameter("shader_cache", "ShaderCache", "", True )], f"shader_cache(shader_cache), fsat({number_of_elements_in_each_buffer})", f"""
     { ubo_matrices_initialization if (is_ubo_1024_shader) else "" }
     glGenVertexArrays(1, &vertex_attribute_object);
     glBindVertexArray(vertex_attribute_object);
     glGenBuffers(1, &indices_buffer_object);
     // reserve space for 1 million elements, probably overkill
-    const size_t initial_buffer_size = 10000000;
+    const size_t initial_buffer_size = {number_of_elements_in_each_buffer};
     {self.generate_constructor_body()}
     glBindVertexArray(0);""")
         
@@ -442,8 +445,6 @@ for (const auto &ivptp : tig.ivptps) {
 
         if (is_ubo_1024_shader):
             batcher_class.add_method(CppMethod("upload_ltw_matrices", "void", [], f"""
-    glGenBuffers(1, &ltw_matrices_gl_name);
-    glBindBuffer(GL_UNIFORM_BUFFER, ltw_matrices_gl_name);
     glBufferData(GL_UNIFORM_BUFFER, sizeof(ltw_matrices), ltw_matrices, GL_STATIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, ltw_matrices_gl_name);
             """))
