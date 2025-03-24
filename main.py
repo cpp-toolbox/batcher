@@ -327,6 +327,18 @@ for (const auto &ivptp : tig.ivptps) {
         replace = CppParameter("replace", "bool", "", False, "false") 
         transform_matrix_override = CppParameter("transform_matrix_override", "glm::mat4", "", False, "glm::mat4(0)")
         body = """
+
+
+    int ltw_object_id = tig.id;
+    // TODO: there will be a bug here if you try to override with the zero matrix, but you will probably never do that
+    bool requested_override = transform_matrix_override != glm::mat4(0);
+    if (requested_override) {
+        ltw_matrices[ltw_object_id] = transform_matrix_override;
+    } else {
+        ltw_matrices[ltw_object_id] = tig.transform.get_transform_matrix();
+    }
+
+
     for (auto &ivpntpr : tig.ivpntprs) {
         // Populate bone_indices and bone_weights
         std::vector<glm::ivec4> bone_indices;
@@ -445,6 +457,7 @@ for (const auto &ivptp : tig.ivptps) {
 
         if (is_ubo_1024_shader):
             batcher_class.add_method(CppMethod("upload_ltw_matrices", "void", [], f"""
+    glBindBuffer(GL_UNIFORM_BUFFER, ltw_matrices_gl_name);
     glBufferData(GL_UNIFORM_BUFFER, sizeof(ltw_matrices), ltw_matrices, GL_STATIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, ltw_matrices_gl_name);
             """))
