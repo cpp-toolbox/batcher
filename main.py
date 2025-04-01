@@ -254,6 +254,40 @@ class ShaderBatcherCppClass:
         return body
 
 
+    # TODO: in the future there will be a bass queue draw call and then the extension classes
+    # will extend the body of the function filling in empty data (eg bone transforms or something)
+    def generate_CWL_V_TRANSFORMATION_UBOS_1024_WITH_SOLID_COLOR_specific_class_data(self, batcher_class: CppClass):
+        tig = CppParameter("tig", "draw_info::TransformedIVPGroup", "", True);
+        replace = CppParameter("replace", "bool", "", False, "false") 
+        transform_matrix_override = CppParameter("transform_matrix_override", "glm::mat4", "", False, "glm::mat4(0)")
+        body = """
+
+    if (tig.id == std::nullopt)
+        tig.id = ltw_object_id_generator.get_id();
+
+    int ltw_object_id = tig.id.value();
+    // TODO: there will be a bug here if you try to override with the zero matrix, but you will probably never do that because
+    // that's a geometry destroying transformation
+    bool requested_override = transform_matrix_override != glm::mat4(0);
+    if (requested_override) {
+        ltw_matrices[ltw_object_id] = transform_matrix_override;
+    } else {
+        ltw_matrices[ltw_object_id] = tig.transform.get_transform_matrix();
+    }
+
+    for (auto &ivp : tig.ivps) {
+        std::vector<unsigned int> ltw_indices(ivp.xyz_positions.size(), ltw_object_id);
+        if (ivp.id == std::nullopt) {
+            ivp.id = object_id_generator.get_id();
+        }
+        queue_draw(ivp.id.value(), ivp.indices, ivp.xyz_positions, ltw_indices, replace);
+    }
+        """
+        batcher_class.add_method(CppMethod("queue_draw", "void", [tig, replace, transform_matrix_override] , 
+                                            body, "public"))
+
+
+
     def generate_TEXTURE_PACKER_CWL_V_TRANSFORMATION_UBOS_1024_specfic_class_data(self, batcher_class : CppClass):
 
         indices = CppParameter("indices", "std::vector<unsigned int>")
@@ -273,6 +307,7 @@ auto packed_bullet_for_copying = draw_info::IVPTexturePacked(
         """
 
 
+        # TODO: generic enough to be in any ltw batcher class
         tig = CppParameter("tig_to_update", "draw_info::TransformedIVPTPGroup", "", True);
         body = """
 tig_to_update.id = ltw_object_id_generator.get_id();
@@ -471,6 +506,10 @@ for (const auto &ivptp : tig.ivptps) {
 
         batcher_class.add_method(CppMethod("queue_draw", "void", self.generate_queue_draw_parameter_list(), 
                                             self.generate_queue_draw_body(), "public"))
+
+
+        if (self.shader_type == ShaderType.CWL_V_TRANSFORMATION_UBOS_1024_WITH_SOLID_COLOR):
+             self.generate_CWL_V_TRANSFORMATION_UBOS_1024_WITH_SOLID_COLOR_specific_class_data(batcher_class)
 
         if (self.shader_type == ShaderType.TEXTURE_PACKER_CWL_V_TRANSFORMATION_UBOS_1024):
             self.generate_TEXTURE_PACKER_CWL_V_TRANSFORMATION_UBOS_1024_specfic_class_data(batcher_class)
