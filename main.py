@@ -262,26 +262,22 @@ class ShaderBatcherCppClass:
         transform_matrix_override = CppParameter("transform_matrix_override", "glm::mat4", "", False, "glm::mat4(0)")
         body = """
 
-    if (tig.id == std::nullopt)
-        tig.id = ltw_object_id_generator.get_id();
 
-    int ltw_object_id = tig.id.value();
-    // TODO: there will be a bug here if you try to override with the zero matrix, but you will probably never do that because
-    // that's a geometry destroying transformation
-    bool requested_override = transform_matrix_override != glm::mat4(0);
-    if (requested_override) {
-        ltw_matrices[ltw_object_id] = transform_matrix_override;
-    } else {
-        ltw_matrices[ltw_object_id] = tig.transform.get_transform_matrix();
-    }
 
-    for (auto &ivp : tig.ivps) {
-        std::vector<unsigned int> ltw_indices(ivp.xyz_positions.size(), ltw_object_id);
-        if (ivp.id == std::nullopt) {
-            ivp.id = object_id_generator.get_id();
-        }
-        queue_draw(ivp.id.value(), ivp.indices, ivp.xyz_positions, ltw_indices, replace);
-    }
+int ltw_object_id = tig.id;
+// TODO: there will be a bug here if you try to override with the zero matrix, but you will probably never do that
+bool requested_override = transform_matrix_override != glm::mat4(0);
+if (requested_override) {
+    ltw_matrices[ltw_object_id] = transform_matrix_override;
+} else {
+    ltw_matrices[ltw_object_id] = tig.transform.get_transform_matrix();
+}
+
+
+for (auto &ivp : tig.ivps) {
+    std::vector<unsigned int> ltw_indices(ivp.xyz_positions.size(), ltw_object_id);
+    queue_draw(ivp.id, ivp.indices, ivp.xyz_positions, ltw_indices, replace);
+}
         """
         batcher_class.add_method(CppMethod("queue_draw", "void", [tig, replace, transform_matrix_override] , 
                                             body, "public"))
@@ -293,19 +289,7 @@ class ShaderBatcherCppClass:
         indices = CppParameter("indices", "std::vector<unsigned int>")
         xyz_positions = CppParameter("xyz_positions", "std::vector<glm::vec3>")
 
-        body = """
-
-auto packed_bullet_for_copying = draw_info::IVPTexturePacked(
-    bullet_indices, bullet_verts, bullet_sta.texture_coordinates, bullet_sta.texture_coordinates,
-    bullet_sta.packed_texture_index, bullet_sta.packed_texture_bounding_box_index, all_colors_image_path, -1);
-        """
-
-
-
         ivptps = CppParameter("ivptps", "std::vector<draw_info::IVPTexturePacked>")
-        body = """
-        """
-
 
         # TODO: generic enough to be in any ltw batcher class
         tig = CppParameter("tig_to_update", "draw_info::TransformedIVPTPGroup", "", True);
