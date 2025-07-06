@@ -1,5 +1,6 @@
 from re import sub
 from cpp_utils.main import *
+from fs_utils.main import *
 from enum import Enum, auto;
 from dataclasses import dataclass
 from typing import List
@@ -572,7 +573,7 @@ def wipe_generated_directory():
         shutil.rmtree(generated_dir)
     os.makedirs(generated_dir)
 
-def read_config_file(config_file):
+def get_required_shaders(config_file):
     """Read the configuration file and return a list of ShaderType enums after validation."""
     with open(config_file, 'r') as file:
         shader_names = [line.strip() for line in file if line.strip()]
@@ -597,6 +598,10 @@ def validate_shader_names(shader_names):
     print("All shader names are valid.")
     return selected_shaders  # Return the list of ShaderType enums
 
+
+
+
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Generate C++ shader batcher classes.')
@@ -609,10 +614,12 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # we assume that submodules can define their own required shader batchers and then we compile all those here.
+    concatenate_files(find_all_instances_of_file_in_directory_recursively(".", ".required_shader_batchers.txt"), ".all_required_shader_batchers.txt")
 
     if args.generate_config:
         selected_shaders = list_available_shaders(shader_to_used_vertex_attribute_variables)
-        config_file_path = os.path.join(args.config_file_output_dir, '.requested_shaders.txt')
+        config_file_path = os.path.join(args.config_file_output_dir, '.all_required_shader_batchers.txt')
         with open(config_file_path, 'w') as config_file:
             for shader in selected_shaders:
                 shader_name = str(shader).split('.')[-1].lower()
@@ -624,7 +631,9 @@ if __name__ == "__main__":
                 print(f"Configuration file {args.config_file} not found.")
                 sys.exit(1)
 
-            selected_shaders = read_config_file(args.config_file)
+
+
+            selected_shaders = get_required_shaders(args.config_file)
             print(f"Selected shaders from config file: {selected_shaders}")
         else:
             selected_shaders = list_available_shaders(shader_to_used_vertex_attribute_variables)
