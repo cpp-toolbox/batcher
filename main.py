@@ -3,7 +3,7 @@ from cpp_utils.main import *
 from fs_utils.main import *
 from enum import Enum, auto;
 from dataclasses import dataclass
-from typing import List
+from typing import List, Dict
 from shader_summary import *
 import argparse
 import sys
@@ -60,9 +60,11 @@ class ShaderBatcherCppStruct:
 
         return cpp_struct
 
+
+
 class ShaderBatcherCppClass:
     def __init__(self, shader_type: ShaderType, vertex_attributes : List[ShaderVertexAttributeVariable]):
-        self.shader_type = shader_type
+        self.shader_type : ShaderType = shader_type
         self.vertex_attributes: List[ShaderVertexAttributeVariable] = vertex_attributes
 
     def get_class_name(self) -> str:
@@ -81,8 +83,6 @@ class ShaderBatcherCppClass:
 
         parameter_list.append(CppParameter("replace", "bool", "", False, "false"))
         return parameter_list
-
-
 
     def generate_constructor_body(self) -> str:
         body = ""
@@ -113,6 +113,135 @@ class ShaderBatcherCppClass:
            body += f"""
     glDeleteBuffers(1, &{buffer_object_var_name});"""
         return body
+
+    def get_queue_draw_methods_for_draw_info_structs(self) -> List[CppMethod]:
+
+        class DrawInfo(Enum):
+            INDEXED_VERTEX_POSITIONS = "draw_info::IndexedVertexPositions"
+
+            IVPTEXTURED = "draw_info::IVPTextured"
+            IVPCOLOR = "draw_info::IVPColor"
+
+            IVPNORMALS = "draw_info::IVPNormals"
+            IVPNCOLOR = "draw_info::IVPNColor"
+            IVPNTEXTURED = "draw_info::IVPNTextured"
+
+        # NOTE not all of them are here
+        draw_info_struct_hierarchy = {
+            DrawInfo.INDEXED_VERTEX_POSITIONS: {
+                DrawInfo.IVPNORMALS: {
+                    DrawInfo.IVPNCOLOR: {},
+                    DrawInfo.IVPNTEXTURED: {}
+                },
+                DrawInfo.IVPTEXTURED: {},
+                DrawInfo.IVPCOLOR: {}
+            }
+        }
+
+        ivp_param: CppParameter = CppParameter("ivp", DrawInfo.INDEXED_VERTEX_POSITIONS.value, "", )
+        ivp_param_ref: CppParameter = CppParameter("ivp", DrawInfo.INDEXED_VERTEX_POSITIONS.value, "", True)
+
+        ivpn_param: CppParameter = CppParameter("ivpn", DrawInfo.IVPNORMALS.value, "", )
+        ivpn_param_ref: CppParameter = CppParameter("ivpn", DrawInfo.IVPNORMALS.value, "", True)
+
+        ivpc_param: CppParameter = CppParameter("ivpc", DrawInfo.IVPCOLOR.value, "", )
+        ivpc_param_ref: CppParameter = CppParameter("ivpc", DrawInfo.IVPCOLOR.value, "", True)
+
+        ivpnc_param: CppParameter = CppParameter("ivpnc", DrawInfo.IVPNCOLOR.value, "", )
+        ivpnc_param_ref: CppParameter = CppParameter("ivpnc", DrawInfo.IVPNCOLOR.value, "", True)
+
+        # NOTE: this should be elsewhere
+        def generate_ivpX_register_body(struct_name:str) -> str:
+            return f"""
+    {struct_name}.id = ltw_object_id_generator.get_id();"""
+
+        is_ubo_shader = ShaderVertexAttributeVariable.LOCAL_TO_WORLD_INDEX in self.vertex_attributes
+
+        def generate_ivpX_queue_draw_body(struct_name: str, attributes: List[str]) -> str:
+            arg_list: str = ", ".join([struct_name + "." + attr for attr in attributes])
+
+            optional_ubo_matrix_uploading_logic: str = f"""
+    // NOTE: for singular draw objects their ID represent their ltw matrix index
+    // but when working with tigs they don't (collection of draw_info structs all with same ltw idx)
+    ltw_matrices[{struct_name}.id] = {struct_name}.transform.get_transform_matrix();
+            """
+
+            return f"""
+{optional_ubo_matrix_uploading_logic if is_ubo_shader else ""} 
+
+    {f'std::vector<unsigned int> ltw_indices({struct_name}.xyz_positions.size(), {struct_name}.id);' if is_ubo_shader else ''}
+    queue_draw({struct_name}.id, {struct_name}.indices, {arg_list}{', ltw_indices' if is_ubo_shader else ''}); """
+
+        ivpX_param_to_superclass_params : Dict[CppParameter, List[CppParameter]] = {
+            ivp_param: [ivp_param, ivpn_param, ivpc_param, ivpnc_param],
+            ivpn_param: [ivpn_param, ivpnc_param],
+            ivpc_param: [ivpc_param, ivpnc_param],
+            ivpnc_param: [ivpnc_param],
+        }
+
+        def generate_ivpX_queue_draw_hierarchy_methods(base_param: CppParameter, draw_info_attribute_names: List[str]) -> List[CppMethod]:
+            return [CppMethod("queue_draw", "void", [super_class_param],
+                       generate_ivpX_queue_draw_body(super_class_param.name, draw_info_attribute_names), "public") for
+             super_class_param in ivpX_param_to_superclass_params[base_param]]
+
+
+        ivp_queue_draw_hierarchy_methods = generate_ivpX_queue_draw_hierarchy_methods(ivp_param, ["xyz_positions"])
+        ivpn_queue_draw_hierarchy_methods = generate_ivpX_queue_draw_hierarchy_methods(ivpn_param, ["xyz_positions", "normals"])
+        ivpc_queue_draw_hierarchy_methods = generate_ivpX_queue_draw_hierarchy_methods(ivpc_param, ["xyz_positions", "rgb_colors"])
+        ivpnc_queue_draw_hierarchy_methods = generate_ivpX_queue_draw_hierarchy_methods(ivpnc_param, ["xyz_positions", "normals", "rgb_colors"])
+
+        ivp_register_method = CppMethod("tag_id", "void", [ivp_param_ref], generate_ivpX_register_body("ivp"), "public")
+        ivpn_register_method = CppMethod("tag_id", "void", [ivpn_param_ref], generate_ivpX_register_body("ivpn"), "public")
+        ivpc_register_method = CppMethod("tag_id", "void", [ivpc_param_ref], generate_ivpX_register_body("ivpc"), "public")
+        ivpnc_register_method = CppMethod("tag_id", "void", [ivpnc_param_ref], generate_ivpX_register_body("ivpnc"), "public")
+
+        draw_info_struct_to_queue_draw_cpp_methods: Dict[DrawInfo, List[CppMethod]] = {
+            DrawInfo.INDEXED_VERTEX_POSITIONS: ivp_queue_draw_hierarchy_methods,
+            DrawInfo.IVPNORMALS: ivpn_queue_draw_hierarchy_methods,
+            DrawInfo.IVPCOLOR: ivpc_queue_draw_hierarchy_methods,
+            DrawInfo.IVPNCOLOR: ivpnc_queue_draw_hierarchy_methods
+        }
+
+        draw_info_struct_to_register_cpp_method: Dict[DrawInfo, CppMethod] = {
+            DrawInfo.INDEXED_VERTEX_POSITIONS: ivp_register_method,
+            DrawInfo.IVPNORMALS: ivpn_register_method,
+            DrawInfo.IVPCOLOR: ivpc_register_method,
+            DrawInfo.IVPNCOLOR: ivpnc_register_method
+        }
+
+        shader_vertex_attribute_variables_to_valid_draw_info_structs: Dict[
+            frozenset[ShaderVertexAttributeVariable], DrawInfo] = {
+            frozenset({ShaderVertexAttributeVariable.XYZ_POSITION}): DrawInfo.INDEXED_VERTEX_POSITIONS,
+            frozenset({ShaderVertexAttributeVariable.XYZ_POSITION,
+                       ShaderVertexAttributeVariable.PASSTHROUGH_NORMAL}): DrawInfo.IVPNORMALS,
+            frozenset({ShaderVertexAttributeVariable.XYZ_POSITION,
+                       ShaderVertexAttributeVariable.PASSTHROUGH_RGB_COLOR}): DrawInfo.IVPCOLOR,
+            frozenset({ShaderVertexAttributeVariable.XYZ_POSITION, ShaderVertexAttributeVariable.PASSTHROUGH_RGB_COLOR,
+                       ShaderVertexAttributeVariable.PASSTHROUGH_NORMAL}):
+                DrawInfo.IVPNCOLOR,
+        }
+
+        all_shader_vertex_attributes : frozenset[ShaderVertexAttributeVariable] = frozenset([va  for va in self.vertex_attributes if va != ShaderVertexAttributeVariable.LOCAL_TO_WORLD_INDEX])
+
+        print(self.shader_type.name, ",".join([sva.name for sva in all_shader_vertex_attributes]))
+
+        queue_draw_methods : List[CppMethod] = []
+
+        if all_shader_vertex_attributes in shader_vertex_attribute_variables_to_valid_draw_info_structs:
+            associated_draw_info_struct : DrawInfo = shader_vertex_attribute_variables_to_valid_draw_info_structs[all_shader_vertex_attributes]
+            associated_queue_draw_methods : List[CppMethod] = draw_info_struct_to_queue_draw_cpp_methods[associated_draw_info_struct]
+            queue_draw_methods.extend(associated_queue_draw_methods)
+
+            if is_ubo_shader:
+                associated_register_method: CppMethod = draw_info_struct_to_register_cpp_method[
+                    associated_draw_info_struct]
+                queue_draw_methods.append(associated_register_method)
+        else:
+            print("cannot find an associated queue draw call")
+
+
+        return queue_draw_methods
+
 
     def generate_queue_draw_body(self) -> str:
 
@@ -284,7 +413,6 @@ for (auto &ivp : tig.ivps) {
                                             body, "public"))
 
 
-
     def generate_TEXTURE_PACKER_CWL_V_TRANSFORMATION_UBOS_1024_specfic_class_data(self, batcher_class : CppClass):
 
         indices = CppParameter("indices", "std::vector<unsigned int>")
@@ -397,19 +525,7 @@ for (const auto &ivptp : tig.ivptps) {
     def generate_cpp_class(self) -> CppClass:
         batcher_class = CppClass(self.get_class_name())
 
-        ubo_shader_types = [
-            ShaderType.CWL_V_TRANSFORMATION_UBOS_1024_WITH_SOLID_COLOR,
-            ShaderType.CWL_V_TRANSFORMATION_UBOS_1024_WITH_COLORED_VERTEX,
-            ShaderType.CWL_V_TRANSFORMATION_UBOS_1024_WITH_COLORED_VERTEX_DEFERED_LIGHTING_FRAMEBUFFERS,
-            ShaderType.CWL_V_TRANSFORMATION_UBOS_1024_WITH_OBJECT_ID,
-            ShaderType.TEXTURE_PACKER_CWL_V_TRANSFORMATION_UBOS_1024,
-            ShaderType.TEXTURE_PACKER_CWL_V_TRANSFORMATION_UBOS_1024_AMBIENT_AND_DIFFUSE_LIGHTING,
-            ShaderType.TEXTURE_PACKER_CWL_V_TRANSFORMATION_UBOS_1024_MULTIPLE_LIGHTS,
-            ShaderType.TEXTURE_PACKER_RIGGED_AND_ANIMATED_CWL_V_TRANSFORMATION_UBOS_1024_WITH_TEXTURES_AND_MULTIPLE_LIGHTS,
-            ShaderType.TEXTURE_PACKER_RIGGED_AND_ANIMATED_CWL_V_TRANSFORMATION_UBOS_1024_WITH_TEXTURES,
-        ]
-
-        is_ubo_1024_shader : bool = self.shader_type in ubo_shader_types
+        is_ubo_1024_shader = ShaderVertexAttributeVariable.LOCAL_TO_WORLD_INDEX in self.vertex_attributes
         # CLASS ATTRIBUTES START
 
         if (is_ubo_1024_shader):
@@ -421,6 +537,9 @@ for (const auto &ivptp : tig.ivptps) {
         batcher_class.add_member(CppMember("shader_cache", "ShaderCache"))
         batcher_class.add_member(CppMember("vertex_attribute_object", "GLuint"))
         batcher_class.add_member(CppMember("indices_buffer_object", "GLuint"))
+
+        for method in self.get_queue_draw_methods_for_draw_info_structs():
+            batcher_class.add_method(method)
 
         # add vector for each thing this shader type has
         for vertex_attribute in self.vertex_attributes:
@@ -598,10 +717,6 @@ def validate_shader_names(shader_names):
     print("All shader names are valid.")
     return selected_shaders  # Return the list of ShaderType enums
 
-
-
-
-
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Generate C++ shader batcher classes.')
@@ -631,8 +746,6 @@ if __name__ == "__main__":
                 print(f"Configuration file {args.config_file} not found.")
                 sys.exit(1)
 
-
-
             selected_shaders = get_required_shaders(args.config_file)
             print(f"Selected shaders from config file: {selected_shaders}")
         else:
@@ -647,6 +760,7 @@ if __name__ == "__main__":
         script_directory = os.path.dirname(os.path.abspath(__file__)) + "/generated"
 
 
+        # NOTE: this is the main logic that starts off everything
         for shader_type, vertex_attributes in shader_to_used_vertex_attribute_variables.items():
 
             if shader_type not in selected_shaders:
@@ -688,8 +802,6 @@ if __name__ == "__main__":
             print(f"Header written to {header_filename}")
             print(f"Source written to {source_filename}")
             constructed_class_names.append(shader_batcher.get_class_name())
-
-
 
         batcher_cpp_class_creator = BatcherCppClassCreator(constructed_class_names)
         batcher_class = batcher_cpp_class_creator.generate_cpp_class()
