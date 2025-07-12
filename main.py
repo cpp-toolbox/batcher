@@ -153,6 +153,7 @@ class ShaderBatcherCppClass:
         # NOTE: this should be elsewhere
         def generate_ivpX_register_body(struct_name:str) -> str:
             return f"""
+            // NOTE: THIS IS WRONG when we use a tig the id's are not in sync, thus we need a separate id for both, fix later
     {struct_name}.id = ltw_object_id_generator.get_id();"""
 
         is_ubo_shader = ShaderVertexAttributeVariable.LOCAL_TO_WORLD_INDEX in self.vertex_attributes
@@ -179,10 +180,25 @@ class ShaderBatcherCppClass:
             ivpnc_param: [ivpnc_param],
         }
 
+        ivpX_param_ref_to_superclass_param_refs : Dict[CppParameter, List[CppParameter]] = {
+            ivp_param_ref: [ivp_param_ref, ivpn_param_ref, ivpc_param_ref, ivpnc_param_ref],
+            ivpn_param_ref: [ivpn_param_ref, ivpnc_param_ref],
+            ivpc_param_ref: [ivpc_param_ref, ivpnc_param_ref],
+            ivpnc_param_ref: [ivpnc_param_ref],
+        }
+
+        # NOTE: we are generating a bunch of versions of the same function by allowing classes with at least the same attributes as the 
+        # base param class to be passed in saving us time in the cpp code
+
         def generate_ivpX_queue_draw_hierarchy_methods(base_param: CppParameter, draw_info_attribute_names: List[str]) -> List[CppMethod]:
             return [CppMethod("queue_draw", "void", [super_class_param],
                        generate_ivpX_queue_draw_body(super_class_param.name, draw_info_attribute_names), "public") for
              super_class_param in ivpX_param_to_superclass_params[base_param]]
+
+        def generate_ivpX_tag_id_hierarchy_methods(base_param_ref: CppParameter) -> List[CppMethod]:
+            return [CppMethod("tag_id", "void", [super_class_param_ref],
+                       generate_ivpX_register_body(super_class_param_ref.name), "public") for
+             super_class_param_ref in ivpX_param_ref_to_superclass_param_refs[base_param_ref]]
 
 
         ivp_queue_draw_hierarchy_methods = generate_ivpX_queue_draw_hierarchy_methods(ivp_param, ["xyz_positions"])
@@ -190,10 +206,10 @@ class ShaderBatcherCppClass:
         ivpc_queue_draw_hierarchy_methods = generate_ivpX_queue_draw_hierarchy_methods(ivpc_param, ["xyz_positions", "rgb_colors"])
         ivpnc_queue_draw_hierarchy_methods = generate_ivpX_queue_draw_hierarchy_methods(ivpnc_param, ["xyz_positions", "normals", "rgb_colors"])
 
-        ivp_register_method = CppMethod("tag_id", "void", [ivp_param_ref], generate_ivpX_register_body("ivp"), "public")
-        ivpn_register_method = CppMethod("tag_id", "void", [ivpn_param_ref], generate_ivpX_register_body("ivpn"), "public")
-        ivpc_register_method = CppMethod("tag_id", "void", [ivpc_param_ref], generate_ivpX_register_body("ivpc"), "public")
-        ivpnc_register_method = CppMethod("tag_id", "void", [ivpnc_param_ref], generate_ivpX_register_body("ivpnc"), "public")
+        ivp_tag_id_hierarchy_methods = generate_ivpX_tag_id_hierarchy_methods(ivp_param_ref)
+        ivpn_tag_id_hierarchy_methods = generate_ivpX_tag_id_hierarchy_methods(ivpn_param_ref)
+        ivpc_tag_id_hierarchy_methods = generate_ivpX_tag_id_hierarchy_methods(ivpc_param_ref)
+        ivpnc_tag_id_hierarchy_methods = generate_ivpX_tag_id_hierarchy_methods(ivpc_param_ref)
 
         draw_info_struct_to_queue_draw_cpp_methods: Dict[DrawInfo, List[CppMethod]] = {
             DrawInfo.INDEXED_VERTEX_POSITIONS: ivp_queue_draw_hierarchy_methods,
@@ -202,11 +218,11 @@ class ShaderBatcherCppClass:
             DrawInfo.IVPNCOLOR: ivpnc_queue_draw_hierarchy_methods
         }
 
-        draw_info_struct_to_register_cpp_method: Dict[DrawInfo, CppMethod] = {
-            DrawInfo.INDEXED_VERTEX_POSITIONS: ivp_register_method,
-            DrawInfo.IVPNORMALS: ivpn_register_method,
-            DrawInfo.IVPCOLOR: ivpc_register_method,
-            DrawInfo.IVPNCOLOR: ivpnc_register_method
+        draw_info_struct_to_register_cpp_method: Dict[DrawInfo, List[CppMethod]] = {
+            DrawInfo.INDEXED_VERTEX_POSITIONS: ivp_tag_id_hierarchy_methods,
+            DrawInfo.IVPNORMALS: ivpn_tag_id_hierarchy_methods,
+            DrawInfo.IVPCOLOR: ivpc_tag_id_hierarchy_methods,
+            DrawInfo.IVPNCOLOR: ivpnc_tag_id_hierarchy_methods
         }
 
         shader_vertex_attribute_variables_to_valid_draw_info_structs: Dict[
@@ -233,9 +249,9 @@ class ShaderBatcherCppClass:
             queue_draw_methods.extend(associated_queue_draw_methods)
 
             if is_ubo_shader:
-                associated_register_method: CppMethod = draw_info_struct_to_register_cpp_method[
+                associated_tag_id_methods: List[CppMethod] = draw_info_struct_to_register_cpp_method[
                     associated_draw_info_struct]
-                queue_draw_methods.append(associated_register_method)
+                queue_draw_methods.extend(associated_tag_id_methods)
         else:
             print("cannot find an associated queue draw call")
 
