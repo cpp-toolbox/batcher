@@ -803,32 +803,40 @@ def get_required_shaders(config_file) -> List[ShaderRequest]:
     return validate_shader_specs(shader_specs)
 
 
-def validate_shader_specs(shader_specs: List[str]) -> List[ShaderRequest]:
+def validate_shader_specs(shader_specs: List[str]) -> List["ShaderRequest"]:
     """Validate shader specs and return a list of ShaderRequest objects (shader + buffer size)."""
     valid_shader_names = {shader.name.lower(): shader for shader in ShaderType}  # Map enum names to enum values
     shader_requests = []
 
-    pattern = re.compile(r"^([a-zA-Z0-9_]+)\((\d+)\)$")
+    pattern_with_size = re.compile(r"^([a-zA-Z0-9_]+)\((\d+)\)$")
+    pattern_no_size   = re.compile(r"^([a-zA-Z0-9_]+)$")
+
+    DEFAULT_NUM_ELEMENTS = 100000
 
     for spec in shader_specs:
-        match = pattern.match(spec)
-        if not match:
-            print(f"Error: Invalid format '{spec}'. Expected 'shader_name(num_elements)'.")
+        match_with_size = pattern_with_size.match(spec)
+        match_no_size   = pattern_no_size.match(spec)
+
+        if match_with_size:
+            shader_name, num_elements_str = match_with_size.groups()
+            num_elements = int(num_elements_str)
+        elif match_no_size:
+            shader_name = match_no_size.group(1)
+            num_elements = DEFAULT_NUM_ELEMENTS
+        else:
+            print(f"Error: Invalid format '{spec}'. Expected 'shader_name' or 'shader_name(num_elements)'.")
             exit(1)
 
-        shader_name, num_elements_str = match.groups()
         shader_name = shader_name.lower()
         
         if shader_name not in valid_shader_names:
             print(f"Error: '{shader_name}' is not a valid shader type.")
             exit(1)
 
-        num_elements = int(num_elements_str)
         if num_elements <= 0:
             print(f"Error: buffer size must be positive in '{spec}'.")
             exit(1)
 
-        # Create ShaderRequest (assuming it takes ShaderType + num_elements)
         shader_requests.append(ShaderRequest(valid_shader_names[shader_name], num_elements))
 
     print("All shader specs are valid.")
