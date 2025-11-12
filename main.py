@@ -31,6 +31,15 @@ glBindVertexArray(0);
 TAB = "    "
 
 
+# TODO: use the ones from text utils in the future.
+def snake_to_abbr(snake_str: str) -> str:
+    """
+    Converts a snake_case string to its abbreviation.
+    Example: "convert_to_abbreviation" -> "cta"
+    """
+    return "".join(word[0] for word in snake_str.split("_") if word).lower()
+
+
 def snake_to_camel_case(snake_str):
     components = snake_str.lower().split("_")
     return "".join(x.title() for x in components)
@@ -327,6 +336,16 @@ class ShaderBatcherCppClass:
                         [ivpX_param_ref],
                         delete_object_body,
                         "public",
+                        initializer_list="",
+                        define_in_header=False,
+                        qualifiers=[],
+                        docstring_comment="""
+                    /**
+                     * @brief Deletes an object from this shader batcher
+                     * 
+                     *  This frees up all resources for the given object id, and allows that id to be used again.
+                     */ 
+                    """,
                     )
                 )
         else:
@@ -719,13 +738,13 @@ cache({ivpX_struct_parameter_name}.id, {ivpX_struct_parameter_name}.indices, {ar
             "transform_matrix_override", "glm::mat4", "", False, "glm::mat4(0)"
         )
         body = """
-
-
+LogSection _(global_logger, "queue_draw(tig)", logging_enabled);
 
 int ltw_object_id = tig.id;
 // TODO: there will be a bug here if you try to override with the zero matrix, but you will probably never do that
 bool requested_override = transform_matrix_override != glm::mat4(0);
 if (requested_override) {
+    global_logger.info("setting matrix override");
     ltw_matrices[ltw_object_id] = transform_matrix_override;
 } else {
     ltw_matrices[ltw_object_id] = tig.transform.get_transform_matrix();
@@ -744,6 +763,16 @@ for (auto &ivp : tig.ivps) {
                 [tig, replace, transform_matrix_override],
                 body,
                 "public",
+                initializer_list="",
+                define_in_header=False,
+                qualifiers=[],
+                docstring_comment="""
+                    /**
+                     * @brief Deletes an object from this shader batcher
+                     * 
+                     *  This frees up all resources for the given object id, and allows that id to be used again.
+                     */ 
+                    """,
             )
         )
 
@@ -761,28 +790,63 @@ for (auto &ivp : tig.ivps) {
             "tig_to_update", "draw_info::TransformedIVPTPGroup", "", True
         )
         body = """
+LogSection _(global_logger, "update_tig_ids", logging_enabled);
 tig_to_update.id = ltw_object_id_generator.get_id();
 for (auto &ivptp : tig_to_update.ivptps) {
     // NOTE: note that we must regenerate the internal ivptp ids because we do not use instancing here and for each
     // object we store its ltw matrices so we can't re-use the same geometry
     ivptp.id = object_id_generator.get_id();
+    global_logger.info("set id to: {}", ivptp.id);
 }
         """
         batcher_class.add_method(
-            CppMethod("update_tig_ids", "void", [tig], body, "public")
+            CppMethod(
+                "update_tig_ids",
+                "void",
+                [tig],
+                body,
+                "public",
+                initializer_list="",
+                define_in_header=False,
+                qualifiers=[],
+                docstring_comment="""
+                    /**
+                     * @brief Regenerates all associated ids for a tig
+                     * 
+                     * The point of this function I believe is when you copy an object and then you want to regenerate all its ids
+                     */ 
+                    """,
+            )
         )
 
         const_tig = CppParameter(
             "tig", "draw_info::TransformedIVPTPGroup", "const", True
         )
         body = """
+LogSection _(global_logger, "delete_tig", logging_enabled);
 for (const auto &ivptp : tig.ivptps) {
     delete_object(ivptp.id);
 }
 ltw_object_id_generator.reclaim_id(tig.id);
         """
         batcher_class.add_method(
-            CppMethod("delete_tig", "void", [const_tig], body, "public")
+            CppMethod(
+                "delete_tig",
+                "void",
+                [const_tig],
+                body,
+                "public",
+                initializer_list="",
+                define_in_header=False,
+                qualifiers=[],
+                docstring_comment="""
+                    /**
+                     * @brief Deletes an object from this shader batcher
+                     * 
+                     *  This frees up all resources for the given object id, and allows that id to be used again.
+                     */ 
+                    """,
+            )
         )
 
         tig = CppParameter("tig", "draw_info::TransformedIVPTPGroup")
@@ -791,6 +855,7 @@ ltw_object_id_generator.reclaim_id(tig.id);
             "transform_matrix_override", "glm::mat4", "", False, "glm::mat4(0)"
         )
         body = """
+LogSection _(global_logger, "queue_draw(tig.ivptps)", logging_enabled);
 int ltw_object_id = tig.id;
 // TODO: there will be a bug here if you try to override with the zero matrix, but you will probably never do that
 bool requested_override = transform_matrix_override != glm::mat4(0);
@@ -816,6 +881,14 @@ for (const auto &ivptp : tig.ivptps) {
                 [tig, replace, transform_matrix_override],
                 body,
                 "public",
+                initializer_list="",
+                define_in_header=False,
+                qualifiers=[],
+                docstring_comment="""
+                    /**
+                     * @brief Queues up a tig to be drawn when draw_everything is called
+                     */ 
+                    """,
             )
         )
 
@@ -828,7 +901,7 @@ for (const auto &ivptp : tig.ivptps) {
             "transform_matrix_override", "glm::mat4", "", False, "glm::mat4(0)"
         )
         body = """
-
+    LogSection _(global_logger, "queue_draw(tig.ivpntprs)", logging_enabled);
 
     int ltw_object_id = tig.id;
     // TODO: there will be a bug here if you try to override with the zero matrix, but you will probably never do that
@@ -877,10 +950,19 @@ for (const auto &ivptp : tig.ivptps) {
                 [tig, replace, transform_matrix_override],
                 body,
                 "public",
+                initializer_list="",
+                define_in_header=False,
+                qualifiers=[],
+                docstring_comment="""
+                    /**
+                     * @brief Queues up a tig to be drawn when draw_everything is called
+                     */ 
+                    """,
             )
         )
 
     # NOTE: this is the main entry point to generating each batcher
+    # do a forward seach for add_method
     def generate_cpp_class(self) -> CppClass:
         batcher_class = CppClass(self.get_class_name())
 
@@ -937,6 +1019,15 @@ for (const auto &ivptp : tig.ivptps) {
 
         batcher_class.add_member(CppMember("fsat", f"FixedSizeArrayTracker"))
 
+        batcher_class.add_member(CppMember("logging_enabled", f"bool"))
+        batcher_class.add_member(
+            CppMember(
+                "name",
+                f"std::string",
+                f'"{camel_to_snake_case(self.get_class_name())}"',
+            )
+        )
+
         batcher_class.add_member(
             CppMember("replaced_data_for_an_object_this_tick ", f"bool")
         )
@@ -959,8 +1050,11 @@ for (const auto &ivptp : tig.ivptps) {
 
         # TODO: parameterize
         batcher_class.add_constructor(
-            [CppParameter("shader_cache", "ShaderCache", "", True)],
-            f"shader_cache(shader_cache), fsat({self.num_elements_in_buffer})",
+            [
+                CppParameter("shader_cache", "ShaderCache", "", True),
+                CppParameter("logging_enabled", "bool", "", False, "false"),
+            ],
+            f"shader_cache(shader_cache), logging_enabled(logging_enabled), fsat({self.num_elements_in_buffer}, logging_enabled)",
             f"""
     { ubo_matrices_initialization if (is_ubo_1024_shader) else "" }
     glGenVertexArrays(1, &vertex_attribute_object);
@@ -989,10 +1083,20 @@ for (const auto &ivptp : tig.ivptps) {
                     "void",
                     [],
                     f"""
+    LogSection _(global_logger, "upload_ltw_matrices", logging_enabled);
     glBindBuffer(GL_UNIFORM_BUFFER, ltw_matrices_gl_name);
     glBufferData(GL_UNIFORM_BUFFER, sizeof(ltw_matrices), ltw_matrices, GL_STATIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, ltw_matrices_gl_name);
             """,
+                    access_modifier="public",
+                    initializer_list="",
+                    define_in_header=False,
+                    qualifiers=[],
+                    docstring_comment="""
+                    /**
+                     * @brief Uploads the ltw matrices to the shader
+                     */ 
+                    """,
                 )
             )
 
@@ -1001,12 +1105,17 @@ for (const auto &ivptp : tig.ivptps) {
         # glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
         delete_object_body = f"""
+    LogSection _(global_logger, "delete_object", logging_enabled);
+
+    global_logger.warn("trying to delete object with id: {{}}", object_id);
     auto it = cached_object_ids_to_indices.find(object_id);
     if (it != cached_object_ids_to_indices.end()) {{
         fsat.remove_metadata(object_id);
     {  "ltw_object_id_generator.reclaim_id(object_id);" if self.is_ubo_shader else "object_id_generator.reclaim_id(object_id);"}
         
         cached_object_ids_to_indices.erase(it);
+    }} else {{
+        global_logger.warn("you tried to delete object that was not yet cached, objects become cached when you run queue_draw or cache on them. Most likely you tried to delete an object before actually drawing it.", object_id);
     }}
         """
 
@@ -1017,6 +1126,16 @@ for (const auto &ivptp : tig.ivptps) {
                 [CppParameter("object_id", "unsigned int", "const")],
                 delete_object_body,
                 "public",
+                initializer_list="",
+                define_in_header=False,
+                qualifiers=[],
+                docstring_comment="""
+                    /**
+                     * @brief Deletes an object from this shader batcher
+                     * 
+                     *  This frees up all resources for the given object id, and allows that id to be used again.
+                     */ 
+                    """,
             )
         )
 
@@ -1027,11 +1146,12 @@ for (const auto &ivptp : tig.ivptps) {
             batcher_class.add_method(method)
 
         queue_draw_by_id_body = f"""
+    LogSection _(global_logger, "queue_draw", logging_enabled);
     auto it = cached_object_ids_to_indices.find(object_id);
     if (it != cached_object_ids_to_indices.end()) {{
         object_ids_this_tick.push_back(object_id);
     }} else {{
-        std::cout << "you tried to draw an object that is not cached, we cannot do that, it has id: " << object_id << std::endl;
+        global_logger.warn("you tried to draw an object that is not cached, we cannot do that, it has id: {{}}", object_id);
     }}
         """
 
@@ -1042,6 +1162,14 @@ for (const auto &ivptp : tig.ivptps) {
                 [CppParameter("object_id", "unsigned int", "const")],
                 queue_draw_by_id_body,
                 "public",
+                initializer_list="",
+                define_in_header=False,
+                qualifiers=[],
+                docstring_comment="""
+                    /**
+                     * @brief Queues up a tig to be drawn when draw_everything is called
+                     */ 
+                    """,
             )
         )
 
@@ -1053,6 +1181,14 @@ for (const auto &ivptp : tig.ivptps) {
                 self.generate_queue_draw_parameter_list(),
                 self.generate_queue_draw_body(),
                 "public",
+                initializer_list="",
+                define_in_header=False,
+                qualifiers=[],
+                docstring_comment="""
+                    /**
+                     * @brief Queues up a tig to be drawn when draw_everything is called
+                     */ 
+                    """,
             )
         )
 
@@ -1063,6 +1199,16 @@ for (const auto &ivptp : tig.ivptps) {
                 self.generate_cache_parameter_list(),
                 self.generate_cache_body(),
                 "public",
+                initializer_list="",
+                define_in_header=False,
+                qualifiers=[],
+                docstring_comment="""
+                    /**
+                     * @brief Given some draw info plus an object id, this function caches that data into the shader batcher
+                     * 
+                     * If the object with that id is already cached then nothing happens.
+                     */ 
+                    """,
             )
         )
 
@@ -1094,6 +1240,15 @@ for (const auto &ivptp : tig.ivptps) {
                 [],
                 self.generate_draw_everything_body(),
                 "public",
+                initializer_list="",
+                define_in_header=False,
+                qualifiers=[],
+                docstring_comment="""
+                    /**
+                     * @brief Draws all the data that was queued using the queue_draw call since the last draw_everything call.
+                     * @note just because something is cached doesn't mean it will be drawn it requires an explicit queue_draw call to work.
+                     */ 
+                    """,
             )
         )
 
@@ -1353,7 +1508,7 @@ if __name__ == "__main__":
             )
 
             shader_batcher_header_and_source.add_include(
-                '#include <iostream>\n#include <string>\n#include "../fixed_size_array_tracker/fixed_size_array_tracker.hpp"\n#include "../sbpt_generated_includes.hpp"\n\n'
+                '#include <iostream>\n#include <string>\n#include "../sbpt_generated_includes.hpp"\n\n'
             )
 
             shader_batcher = ShaderBatcherCppClass(
