@@ -67,4 +67,5 @@ To understand the batcher do this conversion
 * also for text, we need to assign each character a unique id, and then we just have to submit what we need, in this case we know the same drawing geometry will be re-used throughout the lifetime of our program so its fine to upload that at the start, but for ui elements, I'm not sure, also if a ui element ever got resized, we would want to clobber/replace that object id, or just use a transform for it I think.
 * the batcher needs to allow for the clearing out of data possibly, this only needs to be done if we start running out of space in our buffers, don't look into that until it occurs
 * the batcher possibly needs to allow for updating a single component of an existant object such as just the normals or something, don't have a usecase yet though
+* would it be possible to just have all the batchers defined, but only use memory when you construct one that way you can write code that relies on it?
 
