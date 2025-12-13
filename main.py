@@ -70,7 +70,7 @@ draw_info_struct_hierarchy = {
 }
 
 shader_vertex_attribute_variables_to_valid_draw_info_structs: Dict[
-    frozenset[ShaderVertexAttributeVariable], DrawInfo
+    'frozenset[ShaderVertexAttributeVariable]', DrawInfo
 ] = {
     frozenset(
         {ShaderVertexAttributeVariable.XYZ_POSITION}
