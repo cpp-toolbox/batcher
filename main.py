@@ -70,7 +70,7 @@ draw_info_struct_hierarchy = {
 }
 
 shader_vertex_attribute_variables_to_valid_draw_info_structs: Dict[
-    'frozenset[ShaderVertexAttributeVariable]', DrawInfo
+    "frozenset[ShaderVertexAttributeVariable]", DrawInfo
 ] = {
     frozenset(
         {ShaderVertexAttributeVariable.XYZ_POSITION}
@@ -738,7 +738,7 @@ cache({ivpX_struct_parameter_name}.id, {ivpX_struct_parameter_name}.indices, {ar
             "transform_matrix_override", "glm::mat4", "", False, "glm::mat4(0)"
         )
         body = """
-GlobalLogSection("queue_draw(tig)", logging_enabled);
+GlobalLogSection("queue_draw(tig)", log_mode);
 
 int ltw_object_id = tig.id;
 // TODO: there will be a bug here if you try to override with the zero matrix, but you will probably never do that
@@ -790,7 +790,7 @@ for (auto &ivp : tig.ivps) {
             "tig_to_update", "draw_info::TransformedIVPTPGroup", "", True
         )
         body = """
-GlobalLogSection("update_tig_ids", logging_enabled);
+GlobalLogSection("update_tig_ids", log_mode);
 tig_to_update.id = ltw_object_id_generator.get_id();
 for (auto &ivptp : tig_to_update.ivptps) {
     // NOTE: note that we must regenerate the internal ivptp ids because we do not use instancing here and for each
@@ -823,7 +823,7 @@ for (auto &ivptp : tig_to_update.ivptps) {
             "tig", "draw_info::TransformedIVPTPGroup", "const", True
         )
         body = """
-GlobalLogSection("delete_tig", logging_enabled);
+GlobalLogSection("delete_tig", log_mode);
 for (const auto &ivptp : tig.ivptps) {
     delete_object(ivptp.id);
 }
@@ -855,7 +855,7 @@ ltw_object_id_generator.reclaim_id(tig.id);
             "transform_matrix_override", "glm::mat4", "", False, "glm::mat4(0)"
         )
         body = """
-GlobalLogSection("queue_draw(tig.ivptps)", logging_enabled);
+GlobalLogSection("queue_draw(tig.ivptps)", log_mode);
 int ltw_object_id = tig.id;
 // TODO: there will be a bug here if you try to override with the zero matrix, but you will probably never do that
 bool requested_override = transform_matrix_override != glm::mat4(0);
@@ -901,7 +901,7 @@ for (const auto &ivptp : tig.ivptps) {
             "transform_matrix_override", "glm::mat4", "", False, "glm::mat4(0)"
         )
         body = """
-    GlobalLogSection("queue_draw(tig.ivpntprs)", logging_enabled);
+    GlobalLogSection("queue_draw(tig.ivpntprs)", log_mode);
 
     int ltw_object_id = tig.id;
     // TODO: there will be a bug here if you try to override with the zero matrix, but you will probably never do that
@@ -1019,7 +1019,7 @@ for (const auto &ivptp : tig.ivptps) {
 
         batcher_class.add_member(CppMember("fsat", f"FixedSizeArrayTracker"))
 
-        batcher_class.add_member(CppMember("logging_enabled", f"bool"))
+        batcher_class.add_member(CppMember("log_mode", f"LogSection::LogMode"))
         batcher_class.add_member(
             CppMember(
                 "name",
@@ -1052,9 +1052,15 @@ for (const auto &ivptp : tig.ivptps) {
         batcher_class.add_constructor(
             [
                 CppParameter("shader_cache", "ShaderCache", "", True),
-                CppParameter("logging_enabled", "bool", "", False, "false"),
+                CppParameter(
+                    "log_mode",
+                    "LogSection::LogMode",
+                    "",
+                    False,
+                    "LogSection::LogMode::disable",
+                ),
             ],
-            f"shader_cache(shader_cache), logging_enabled(logging_enabled), fsat({self.num_elements_in_buffer}, logging_enabled)",
+            f"shader_cache(shader_cache), log_mode(log_mode), fsat({self.num_elements_in_buffer}, log_mode)",
             f"""
     { ubo_matrices_initialization if (is_ubo_1024_shader) else "" }
     glGenVertexArrays(1, &vertex_attribute_object);
@@ -1083,7 +1089,7 @@ for (const auto &ivptp : tig.ivptps) {
                     "void",
                     [],
                     f"""
-    GlobalLogSection("upload_ltw_matrices", logging_enabled);
+    GlobalLogSection("upload_ltw_matrices", log_mode);
     glBindBuffer(GL_UNIFORM_BUFFER, ltw_matrices_gl_name);
     glBufferData(GL_UNIFORM_BUFFER, sizeof(ltw_matrices), ltw_matrices, GL_STATIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, ltw_matrices_gl_name);
@@ -1105,7 +1111,7 @@ for (const auto &ivptp : tig.ivptps) {
         # glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
         delete_object_body = f"""
-    GlobalLogSection("delete_object", logging_enabled);
+    GlobalLogSection("delete_object", log_mode);
 
     global_logger->warn("trying to delete object with id: {{}}", object_id);
     auto it = cached_object_ids_to_indices.find(object_id);
@@ -1146,7 +1152,7 @@ for (const auto &ivptp : tig.ivptps) {
             batcher_class.add_method(method)
 
         queue_draw_by_id_body = f"""
-    GlobalLogSection("queue_draw", logging_enabled);
+    GlobalLogSection("queue_draw", log_mode);
     auto it = cached_object_ids_to_indices.find(object_id);
     if (it != cached_object_ids_to_indices.end()) {{
         object_ids_this_tick.push_back(object_id);
