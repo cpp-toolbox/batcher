@@ -374,7 +374,7 @@ class ShaderBatcherCppClass:
 
 // NOTE: for singular draw objects their ID represent their ltw matrix index
 // but when working with tigs they don't (collection of draw_info structs all with same ltw idx)
-ltw_matrices[{ivpX_struct_parameter_name}.id] = {ivpX_struct_parameter_name}.transform.get_transform_matrix();
+ltw_matrices[{ivpX_struct_parameter_name}.id] = {ivpX_struct_parameter_name}.transform.get_full_transform_matrix();
         """
 
         return f"""
@@ -406,7 +406,7 @@ queue_draw({ivpX_struct_parameter_name}.id, {ivpX_struct_parameter_name}.indices
 
 // NOTE: for singular draw objects their ID represent their ltw matrix index
 // but when working with tigs they don't (collection of draw_info structs all with same ltw idx)
-ltw_matrices[{ivpX_struct_parameter_name}.id] = {ivpX_struct_parameter_name}.transform.get_transform_matrix();
+ltw_matrices[{ivpX_struct_parameter_name}.id] = {ivpX_struct_parameter_name}.transform.get_full_transform_matrix();
         """
 
         return f"""
@@ -747,7 +747,7 @@ if (requested_override) {
     global_logger->info("setting matrix override");
     ltw_matrices[ltw_object_id] = transform_matrix_override;
 } else {
-    ltw_matrices[ltw_object_id] = tig.transform.get_transform_matrix();
+    ltw_matrices[ltw_object_id] = tig.transform.get_full_transform_matrix();
 }
 
 
@@ -862,7 +862,7 @@ bool requested_override = transform_matrix_override != glm::mat4(0);
 if (requested_override) {
     ltw_matrices[ltw_object_id] = transform_matrix_override;
 } else {
-    ltw_matrices[ltw_object_id] = tig.transform.get_transform_matrix();
+    ltw_matrices[ltw_object_id] = tig.transform.get_full_transform_matrix();
 }
 
 for (const auto &ivptp : tig.ivptps) {
@@ -909,7 +909,7 @@ for (const auto &ivptp : tig.ivptps) {
     if (requested_override) {
         ltw_matrices[ltw_object_id] = transform_matrix_override;
     } else {
-        ltw_matrices[ltw_object_id] = tig.transform.get_transform_matrix();
+        ltw_matrices[ltw_object_id] = tig.transform.get_full_transform_matrix();
     }
 
 
